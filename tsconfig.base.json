@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@molty/shared": ["packages/shared/src/index.ts"],
+      "@molty/shared/*": ["packages/shared/src/*"],
+      "@molty/server": ["apps/server/src/index.ts"],
+      "@molty/server/*": ["apps/server/src/*"]
+    }
+  }
+}
