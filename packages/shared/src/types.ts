@@ -1,4 +1,5 @@
 export type Friend = {
+  id: number;
   username: string; // WakaWars username (assumed to match WakaTime username)
   apiKey?: string | null;
 };
@@ -8,6 +9,7 @@ export type FriendPublic = {
 };
 
 export type UserConfig = {
+  id: number;
   wakawarsUsername: string;
   apiKey: string;
   friends: Friend[];

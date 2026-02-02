@@ -59,10 +59,20 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.inherit.plist"
     },
+    "extraResources": [
+      {
+        "from": "assets/trayTemplate.png",
+        "to": "trayTemplate.png"
+      },
+      {
+        "from": "assets/trayTemplate@2x.png",
+        "to": "trayTemplate@2x.png"
+      }
+    ],
     "publish": [
       {
         "provider": "generic",
-        "url": "https://wakawars.molty.cool/updates"
+        "url": "https://wakawars.molty.app/updates"
       }
     ]
   }

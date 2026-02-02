@@ -28,6 +28,36 @@ export const createWakaTimeClient = ({
 } = {}): WakaTimeClient => {
   const cache = new Map<string, CacheEntry>();
 
+  const extractErrorMessage = async (response: Response): Promise<string | null> => {
+    try {
+      const clone = response.clone();
+      const contentType = clone.headers.get("content-type") ?? "";
+      if (contentType.includes("application/json")) {
+        const payload = (await clone.json()) as {
+          error?: string;
+          errors?: string[] | string;
+          message?: string;
+        };
+        const errorValue = payload.error ?? payload.message ?? payload.errors;
+        if (typeof errorValue === "string" && errorValue.trim()) {
+          return errorValue.trim();
+        }
+        if (Array.isArray(errorValue) && errorValue.length) {
+          return errorValue.filter(Boolean).join(", ").trim();
+        }
+      }
+    } catch {
+      // Ignore parsing failures.
+    }
+
+    try {
+      const text = await response.clone().text();
+      return text.trim() || null;
+    } catch {
+      return null;
+    }
+  };
+
   const getStatusBarToday = async (username: string, apiKey: string): Promise<WakaTimeResult> => {
     const cacheKey = `${username}:${apiKey}`;
     const dateKey = new Date().toISOString().slice(0, 10);
@@ -50,10 +80,11 @@ export const createWakaTimeClient = ({
       });
 
       if (response.status === 401 || response.status === 403) {
+        const errorMessage = await extractErrorMessage(response);
         const result: WakaTimeResult = {
           status: "private",
           totalSeconds: 0,
-          error: "User data is private or unauthorized",
+          error: errorMessage || "User data is private or unauthorized",
           fetchedAt: now
         };
         cache.set(cacheKey, { dateKey, fetchedAt: now, result });
@@ -61,10 +92,18 @@ export const createWakaTimeClient = ({
       }
 
       if (response.status === 404) {
+        const errorMessage = await extractErrorMessage(response);
+        const normalizedError = errorMessage?.toLowerCase() ?? "";
+        const isPrivate =
+          normalizedError.includes("private") ||
+          normalizedError.includes("unauthorized") ||
+          normalizedError.includes("forbidden");
         const result: WakaTimeResult = {
-          status: "not_found",
+          status: isPrivate ? "private" : "not_found",
           totalSeconds: 0,
-          error: "User not found",
+          error:
+            errorMessage ||
+            (isPrivate ? "User data is private or unauthorized" : "User not found"),
           fetchedAt: now
         };
         cache.set(cacheKey, { dateKey, fetchedAt: now, result });
@@ -72,10 +111,11 @@ export const createWakaTimeClient = ({
       }
 
       if (!response.ok) {
+        const errorMessage = await extractErrorMessage(response);
         const result: WakaTimeResult = {
           status: "error",
           totalSeconds: 0,
-          error: `Unexpected response (${response.status})`,
+          error: errorMessage || `Unexpected response (${response.status})`,
           fetchedAt: now
         };
         cache.set(cacheKey, { dateKey, fetchedAt: now, result });

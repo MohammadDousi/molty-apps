@@ -1,187 +1,212 @@
 import type { PrismaClient } from "@prisma/client";
 import type { UserConfig } from "@molty/shared";
 
-export type AuthState = {
-  userId: number;
-  wakawarsUsername: string;
-  passwordHash: string | null;
-};
-
-export type ConfigRepository = {
-  getConfig: () => Promise<UserConfig>;
-  saveConfig: (config: { wakawarsUsername: string; apiKey: string }) => Promise<UserConfig>;
-  addFriend: (friend: {
-    username: string;
-    apiKey?: string | null;
-  }) => Promise<UserConfig>;
-  removeFriend: (username: string) => Promise<UserConfig>;
-  getAuthState: () => Promise<AuthState>;
-  setPassword: (passwordHash: string | null) => Promise<UserConfig>;
+export type UserRepository = {
+  countUsers: () => Promise<number>;
+  getUserById: (userId: number) => Promise<UserConfig | null>;
+  getUserByUsername: (username: string) => Promise<UserConfig | null>;
+  createUser: (config: { wakawarsUsername: string; apiKey: string }) => Promise<UserConfig>;
+  updateUser: (
+    userId: number,
+    config: { wakawarsUsername: string; apiKey: string }
+  ) => Promise<UserConfig>;
+  setPassword: (userId: number, passwordHash: string | null) => Promise<UserConfig>;
+  addFriendship: (userId: number, friendId: number) => Promise<UserConfig>;
+  removeFriendship: (userId: number, friendId: number) => Promise<UserConfig>;
+  searchUsers: (
+    query: string,
+    options?: { excludeUserId?: number; limit?: number }
+  ) => Promise<Array<{ id: number; wakawarsUsername: string }>>;
 };
 
 type PrismaUser = {
   id: number;
-  wakawarsUsername: string;
-  apiKey: string;
-  passwordHash: string | null;
-  friends: Array<{ username: string; apiKey: string | null }>;
+  wakawars_username: string;
+  api_key: string;
+  password_hash: string | null;
+  friendships: Array<{
+    friend_id: number;
+    friend: {
+      id: number;
+      wakawars_username: string;
+      api_key: string;
+    };
+  }>;
 };
 
 const mapUserToConfig = (user: PrismaUser): UserConfig => ({
-  wakawarsUsername: user.wakawarsUsername,
-  apiKey: user.apiKey,
-  passwordHash: user.passwordHash,
-  friends: user.friends.map((friend) => ({
-    username: friend.username,
-    apiKey: friend.apiKey
+  id: user.id,
+  wakawarsUsername: user.wakawars_username,
+  apiKey: user.api_key,
+  passwordHash: user.password_hash,
+  friends: user.friendships.map((friendship) => ({
+    id: friendship.friend_id,
+    username: friendship.friend.wakawars_username,
+    apiKey: friendship.friend.api_key || null
   }))
 });
 
-export const createPrismaRepository = (prisma: PrismaClient): ConfigRepository => {
-  const ensureUser = async (): Promise<PrismaUser> => {
-    const existing = await prisma.user.findFirst({
-      include: {
-        friends: true
-      }
+const userInclude = {
+  friendships: {
+    include: {
+      friend: true
+    }
+  }
+} as const;
+
+export const createPrismaRepository = (prisma: PrismaClient): UserRepository => {
+  const countUsers = async () => prisma.ww_user.count();
+
+  const getUserById = async (userId: number) => {
+    const user = await prisma.ww_user.findUnique({
+      where: { id: userId },
+      include: userInclude
     });
 
-    if (existing) {
-      return existing as PrismaUser;
+    if (!user) {
+      return null;
     }
 
-    const created = await prisma.user.create({
-      data: {
-        wakawarsUsername: "",
-        apiKey: ""
-      },
-      include: {
-        friends: true
-      }
+    return mapUserToConfig(user as PrismaUser);
+  };
+
+  const getUserByUsername = async (username: string) => {
+    const user = await prisma.ww_user.findUnique({
+      where: { wakawars_username: username },
+      include: userInclude
     });
 
-    return created as PrismaUser;
+    if (!user) {
+      return null;
+    }
+
+    return mapUserToConfig(user as PrismaUser);
   };
 
-  const getConfig = async () => {
-    const user = await ensureUser();
-    return mapUserToConfig(user);
-  };
-
-  const saveConfig = async ({
+  const createUser = async ({
     wakawarsUsername,
     apiKey
   }: {
     wakawarsUsername: string;
     apiKey: string;
   }) => {
-    const user = await ensureUser();
-
-    const updated = await prisma.user.update({
-      where: { id: user.id },
-      data: { wakawarsUsername, apiKey },
-      include: { friends: true }
+    const user = await prisma.ww_user.create({
+      data: {
+        wakawars_username: wakawarsUsername,
+        api_key: apiKey
+      },
+      include: userInclude
     });
 
-    return mapUserToConfig(updated as PrismaUser);
+    return mapUserToConfig(user as PrismaUser);
   };
 
-  const addFriend = async ({
-    username,
-    apiKey
-  }: {
-    username: string;
-    apiKey?: string | null;
-  }) => {
-    const user = await ensureUser();
-
-    if (username === user.wakawarsUsername) {
-      return mapUserToConfig(user);
+  const updateUser = async (
+    userId: number,
+    {
+      wakawarsUsername,
+      apiKey
+    }: {
+      wakawarsUsername: string;
+      apiKey: string;
     }
-
-    const existing = await prisma.friend.findUnique({
-      where: {
-        userId_username: {
-          userId: user.id,
-          username
-        }
-      }
+  ) => {
+    const user = await prisma.ww_user.update({
+      where: { id: userId },
+      data: { wakawars_username: wakawarsUsername, api_key: apiKey },
+      include: userInclude
     });
 
-    if (!existing) {
-      await prisma.friend.create({
-        data: {
-          username,
-          apiKey: apiKey || null,
-          userId: user.id
-        }
-      });
-    } else {
-      await prisma.friend.update({
+    return mapUserToConfig(user as PrismaUser);
+  };
+
+  const setPassword = async (userId: number, passwordHash: string | null) => {
+    const user = await prisma.ww_user.update({
+      where: { id: userId },
+      data: { password_hash: passwordHash },
+      include: userInclude
+    });
+
+    return mapUserToConfig(user as PrismaUser);
+  };
+
+  const addFriendship = async (userId: number, friendId: number) => {
+    if (userId !== friendId) {
+      await prisma.ww_friendship.upsert({
         where: {
-          userId_username: {
-            userId: user.id,
-            username
+          user_id_friend_id: {
+            user_id: userId,
+            friend_id: friendId
           }
         },
-        data: {
-          apiKey: apiKey ?? existing.apiKey
-        }
+        create: {
+          user_id: userId,
+          friend_id: friendId
+        },
+        update: {}
       });
     }
 
-    const updated = await prisma.user.findUnique({
-      where: { id: user.id },
-      include: { friends: true }
+    const updated = await prisma.ww_user.findUnique({
+      where: { id: userId },
+      include: userInclude
     });
 
     return mapUserToConfig(updated as PrismaUser);
   };
 
-  const removeFriend = async (username: string) => {
-    const user = await ensureUser();
-
-    await prisma.friend.deleteMany({
+  const removeFriendship = async (userId: number, friendId: number) => {
+    await prisma.ww_friendship.deleteMany({
       where: {
-        userId: user.id,
-        username
+        user_id: userId,
+        friend_id: friendId
       }
     });
 
-    const updated = await prisma.user.findUnique({
-      where: { id: user.id },
-      include: { friends: true }
+    const updated = await prisma.ww_user.findUnique({
+      where: { id: userId },
+      include: userInclude
     });
 
     return mapUserToConfig(updated as PrismaUser);
   };
 
-  const getAuthState = async (): Promise<AuthState> => {
-    const user = await ensureUser();
-    return {
-      userId: user.id,
-      wakawarsUsername: user.wakawarsUsername,
-      passwordHash: user.passwordHash
-    };
-  };
+  const searchUsers = async (
+    query: string,
+    options?: { excludeUserId?: number; limit?: number }
+  ) => {
+    const normalized = query.trim();
+    if (!normalized) {
+      return [];
+    }
 
-  const setPassword = async (passwordHash: string | null) => {
-    const user = await ensureUser();
-
-    const updated = await prisma.user.update({
-      where: { id: user.id },
-      data: { passwordHash },
-      include: { friends: true }
+    const users = await prisma.ww_user.findMany({
+      where: {
+        wakawars_username: {
+          contains: normalized,
+          mode: "insensitive"
+        },
+        ...(options?.excludeUserId ? { id: { not: options.excludeUserId } } : {})
+      },
+      take: options?.limit ?? 8,
+      orderBy: { wakawars_username: "asc" }
     });
 
-    return mapUserToConfig(updated as PrismaUser);
+    return users.map((user) => ({
+      id: user.id,
+      wakawarsUsername: user.wakawars_username
+    }));
   };
 
   return {
-    getConfig,
-    saveConfig,
-    addFriend,
-    removeFriend,
-    getAuthState,
-    setPassword
+    countUsers,
+    getUserById,
+    getUserByUsername,
+    createUser,
+    updateUser,
+    setPassword,
+    addFriendship,
+    removeFriendship,
+    searchUsers
   };
 };

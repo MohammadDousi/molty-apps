@@ -3,7 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 
 export type SessionStore = {
   create: (userId: number) => Promise<string>;
-  verify: (token: string, userId: number) => Promise<boolean>;
+  getUserId: (token: string) => Promise<number | null>;
   revoke: (token: string) => Promise<void>;
 };
 
@@ -16,52 +16,52 @@ export const createMemorySessionStore = (): SessionStore => {
     return token;
   };
 
-  const verify = async (token: string, userId: number) => {
+  const getUserId = async (token: string) => {
     const session = sessions.get(token);
-    return Boolean(session && session.userId === userId);
+    return session?.userId ?? null;
   };
 
   const revoke = async (token: string) => {
     sessions.delete(token);
   };
 
-  return { create, verify, revoke };
+  return { create, getUserId, revoke };
 };
 
 export const createPrismaSessionStore = (prisma: PrismaClient): SessionStore => {
   const create = async (userId: number) => {
     const token = crypto.randomBytes(24).toString("hex");
-    await prisma.session.create({
+    await prisma.ww_session.create({
       data: {
         token,
-        userId
+        user_id: userId
       }
     });
     return token;
   };
 
-  const verify = async (token: string, userId: number) => {
-    const session = await prisma.session.findUnique({
+  const getUserId = async (token: string) => {
+    const session = await prisma.ww_session.findUnique({
       where: { token }
     });
 
-    if (!session || session.userId !== userId) {
-      return false;
+    if (!session) {
+      return null;
     }
 
-    await prisma.session.update({
+    await prisma.ww_session.update({
       where: { token },
-      data: { lastUsedAt: new Date() }
+      data: { last_used_at: new Date() }
     });
 
-    return true;
+    return session.user_id;
   };
 
   const revoke = async (token: string) => {
-    await prisma.session.deleteMany({
+    await prisma.ww_session.deleteMany({
       where: { token }
     });
   };
 
-  return { create, verify, revoke };
+  return { create, getUserId, revoke };
 };

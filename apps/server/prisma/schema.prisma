@@ -7,34 +7,36 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id               Int      @id @default(autoincrement())
-  wakawarsUsername String   @default("")
-  apiKey           String   @default("")
-  passwordHash     String?
-  friends          Friend[]
-  sessions         Session[]
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+model ww_user {
+  id                Int              @id @default(autoincrement())
+  wakawars_username String           @unique
+  api_key           String           @default("")
+  password_hash     String?
+  friendships       ww_friendship[]  @relation("user_friendships")
+  friend_of         ww_friendship[]  @relation("friend_friendships")
+  sessions          ww_session[]
+  created_at        DateTime         @default(now())
+  updated_at        DateTime         @updatedAt
 }
 
-model Friend {
-  id        Int      @id @default(autoincrement())
-  username  String
-  apiKey    String?
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([userId, username])
-}
-
-model Session {
+model ww_friendship {
   id         Int      @id @default(autoincrement())
-  token      String   @unique
-  userId     Int
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt  DateTime @default(now())
-  lastUsedAt DateTime @default(now())
+  user_id    Int
+  friend_id  Int
+  user       ww_user  @relation("user_friendships", fields: [user_id], references: [id], onDelete: Cascade)
+  friend     ww_user  @relation("friend_friendships", fields: [friend_id], references: [id], onDelete: Cascade)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([user_id, friend_id])
+  @@index([friend_id])
+}
+
+model ww_session {
+  id           Int      @id @default(autoincrement())
+  token        String   @unique
+  user_id      Int
+  user         ww_user  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  created_at   DateTime @default(now())
+  last_used_at DateTime @default(now())
 }

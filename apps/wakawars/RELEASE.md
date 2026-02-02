@@ -23,7 +23,7 @@ Electron-builder generates `latest-mac.yml` alongside the DMG/ZIP. When using th
 The updater is wired to:
 
 ```
-https://wakawars.molty.cool/updates
+https://wakawars.molty.app/updates
 ```
 
 Host `latest-mac.yml`, the DMG, and the ZIP at that path so the app can discover updates.

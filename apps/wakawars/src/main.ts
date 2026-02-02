@@ -6,7 +6,7 @@ import electronUpdater from "electron-updater";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, screen } =
+const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, screen, nativeTheme } =
   electron;
 const { autoUpdater } = electronUpdater;
 
@@ -16,7 +16,7 @@ const __dirname = path.dirname(__filename);
 let tray: TrayType | null = null;
 let mainWindow: BrowserWindowType | null = null;
 const apiBase = app.isPackaged
-  ? "https://wakawars.molty.cool/wakawars/v0"
+  ? "https://wakawars.molty.app/wakawars/v0"
   : "http://localhost:3000/wakawars/v0";
 let resolveApiBase: ((value: string) => void) | null = null;
 
@@ -26,18 +26,35 @@ const apiBaseReady = new Promise<string>((resolve) => {
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
-const createTrayIcon = () => {
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18">
-      <circle cx="9" cy="9" r="7" fill="black" />
-    </svg>
-  `;
+const getTrayIconPath = () => {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "trayTemplate.png");
+  }
+  return path.join(__dirname, "..", "assets", "trayTemplate.png");
+};
 
-  const icon = nativeImage.createFromDataURL(
-    `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
-  );
-  icon.setTemplateImage(true);
-  return icon;
+const createTrayIcon = () => {
+  const icon = nativeImage.createFromPath(getTrayIconPath());
+  if (!icon.isEmpty()) {
+    icon.setTemplateImage(true);
+    return icon;
+  }
+
+  const fallbackPath = path.join(__dirname, "..", "assets", "trayTemplate.png");
+  const fallback = nativeImage.createFromPath(fallbackPath);
+  if (!fallback.isEmpty()) {
+    fallback.setTemplateImage(true);
+    return fallback;
+  }
+
+  return nativeImage.createEmpty();
+};
+
+const updateTrayIcon = () => {
+  if (!tray) return;
+  const icon = createTrayIcon();
+  tray.setImage(icon);
+  tray.setPressedImage(icon);
 };
 
 const createWindow = () => {
@@ -114,8 +131,10 @@ const toggleWindow = () => {
 };
 
 const createTray = () => {
-  tray = new Tray(createTrayIcon());
+  const icon = createTrayIcon();
+  tray = new Tray(icon);
   tray.setToolTip("WakaWars");
+  tray.setPressedImage(icon);
 
   tray.on("click", toggleWindow);
   tray.on("right-click", () => {
@@ -126,6 +145,7 @@ const createTray = () => {
     ]);
     tray?.popUpContextMenu(menu);
   });
+  nativeTheme.on("updated", updateTrayIcon);
 };
 
 const setupAutoUpdates = () => {

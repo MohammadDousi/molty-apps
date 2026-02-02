@@ -82,7 +82,6 @@ body {
   gap: 8px;
 }
 
-
 .eyebrow {
   margin: 0;
   text-transform: uppercase;
@@ -160,6 +159,12 @@ h2 {
   gap: 8px;
 }
 
+.form-error {
+  margin: 0;
+  font-size: 11px;
+  color: var(--danger);
+}
+
 .stack {
   display: flex;
   flex-direction: column;
@@ -206,14 +211,14 @@ input::placeholder {
 .list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0px;
 }
 
 .row-item {
-  display: grid;
-  grid-template-columns: 30px 1fr auto;
+  display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
   padding: 6px 0;
   border-bottom: 1px solid rgba(120, 140, 170, 0.12);
 }
@@ -223,9 +228,8 @@ input::placeholder {
 }
 
 .row-item.self {
-  background: var(--accent-soft);
-  border-radius: 12px;
-  padding: 6px 8px;
+  background: transparent;
+  border-radius: 0;
 }
 
 .avatar {
@@ -238,20 +242,31 @@ input::placeholder {
   font-weight: 600;
   color: var(--accent);
   font-size: 12px;
+  flex-shrink: 0;
 }
 
 .row-content {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  align-items: center;
+}
+
+.row-item-left {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
 }
 
 .row-title {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   font-weight: 600;
-  font-size: 12px;
+  font-size: 14px;
+  text-align: center;
 }
 
 .badge {

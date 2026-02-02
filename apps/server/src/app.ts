@@ -5,7 +5,7 @@ import { computeLeaderboard } from "@molty/shared";
 import type { PublicConfig, UserConfig, DailyStat, LeaderboardResponse } from "@molty/shared";
 import { createWakaTimeClient } from "./wakatime.js";
 import { createPrismaClient } from "./db.js";
-import { createPrismaRepository, type ConfigRepository } from "./repository.js";
+import { createPrismaRepository, type UserRepository } from "./repository.js";
 import { hashPassword, verifyPassword } from "./auth.js";
 import {
   createMemorySessionStore,
@@ -18,7 +18,7 @@ export type ServerOptions = {
   hostname?: string;
   fetcher?: typeof fetch;
   databaseUrl?: string;
-  repository?: ConfigRepository;
+  repository?: UserRepository;
   sessionStore?: SessionStore;
 };
 
@@ -31,7 +31,18 @@ const toPublicConfig = (config: UserConfig): PublicConfig => ({
   passwordSet: Boolean(config.passwordHash)
 });
 
-const normalizeUsername = (value: string): string => value.trim();
+const normalizeUsername = (value: string): string => value.trim().toLowerCase();
+
+const normalizeFriendUsername = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  const withoutProtocol = trimmed.replace(/^https?:\/\//i, "").replace(/^www\./i, "");
+  const withoutQuery = withoutProtocol.split("?")[0]?.split("#")[0] ?? withoutProtocol;
+  const segments = withoutQuery.split("/").filter(Boolean);
+  const lastSegment = segments.length ? segments[segments.length - 1] : withoutQuery;
+  return normalizeUsername(lastSegment.replace(/^@/, ""));
+};
 
 export const createServer = ({
   port,
@@ -47,19 +58,29 @@ export const createServer = ({
   const sessions =
     sessionStore ?? (prisma ? createPrismaSessionStore(prisma) : createMemorySessionStore());
 
-  const requireSession = async (headers: Record<string, string | undefined>, set: { status: number }) => {
-    const auth = await store.getAuthState();
-    if (!auth.passwordHash) {
-      return { ok: true, auth } as const;
-    }
-
+  const requireSession = async (
+    headers: Record<string, string | undefined>,
+    set: { status: number }
+  ) => {
     const token = headers["x-wakawars-session"];
-    if (!token || !(await sessions.verify(token, auth.userId))) {
+    if (!token) {
       set.status = 401;
-      return { ok: false, auth } as const;
+      return { ok: false, user: null } as const;
     }
 
-    return { ok: true, auth } as const;
+    const userId = await sessions.getUserId(token);
+    if (!userId) {
+      set.status = 401;
+      return { ok: false, user: null } as const;
+    }
+
+    const user = await store.getUserById(userId);
+    if (!user) {
+      set.status = 401;
+      return { ok: false, user: null } as const;
+    }
+
+    return { ok: true, user } as const;
   };
 
   const app = new Elysia({ adapter: node() })
@@ -74,48 +95,58 @@ export const createServer = ({
       group
         .get("/health", () => ({ status: "ok" }))
         .get("/session", async ({ headers }) => {
-          const auth = await store.getAuthState();
-
-          if (!auth.passwordHash) {
-            return {
-              authenticated: true,
-              passwordSet: false,
-              wakawarsUsername: auth.wakawarsUsername
-            };
+          const token = headers["x-wakawars-session"];
+          if (token) {
+            const userId = await sessions.getUserId(token);
+            if (userId) {
+              const user = await store.getUserById(userId);
+              if (user) {
+                return {
+                  authenticated: true,
+                  passwordSet: Boolean(user.passwordHash),
+                  wakawarsUsername: user.wakawarsUsername,
+                  hasUser: true
+                };
+              }
+            }
           }
 
-          const token = headers["x-wakawars-session"];
-          const authenticated = Boolean(token && (await sessions.verify(token, auth.userId)));
-
+          const hasUser = (await store.countUsers()) > 0;
           return {
-            authenticated,
-            passwordSet: true,
-            wakawarsUsername: auth.wakawarsUsername
+            authenticated: false,
+            passwordSet: false,
+            hasUser
           };
         })
         .post(
           "/session/login",
           async ({ body, set }) => {
-            const auth = await store.getAuthState();
-
-            if (!auth.passwordHash) {
+            const username = normalizeUsername(body.username);
+            if (!username) {
               set.status = 400;
-              return { error: "Password not set" };
+              return { error: "Username is required" };
+            }
+            const user = await store.getUserByUsername(username);
+
+            if (!user) {
+              set.status = 404;
+              return { error: "User not found" };
             }
 
-            if (normalizeUsername(body.username) !== auth.wakawarsUsername) {
-              set.status = 401;
-              return { error: "Invalid credentials" };
+            if (user.passwordHash) {
+              const ok = await verifyPassword(body.password, user.passwordHash);
+              if (!ok) {
+                set.status = 401;
+                return { error: "Invalid credentials" };
+              }
             }
 
-            const ok = await verifyPassword(body.password, auth.passwordHash);
-            if (!ok) {
-              set.status = 401;
-              return { error: "Invalid credentials" };
-            }
-
-            const sessionId = await sessions.create(auth.userId);
-            return { sessionId, wakawarsUsername: auth.wakawarsUsername };
+            const sessionId = await sessions.create(user.id);
+            return {
+              sessionId,
+              wakawarsUsername: user.wakawarsUsername,
+              passwordSet: Boolean(user.passwordHash)
+            };
           },
           {
             body: t.Object({
@@ -140,17 +171,13 @@ export const createServer = ({
               return { error: "Password is required" };
             }
 
-            const auth = await store.getAuthState();
-            if (auth.passwordHash) {
-              const token = headers["x-wakawars-session"];
-              if (!token || !(await sessions.verify(token, auth.userId))) {
-                set.status = 401;
-                return { error: "Unauthorized" };
-              }
+            const authCheck = await requireSession(headers, set);
+            if (!authCheck.ok) {
+              return { error: "Unauthorized" };
             }
 
             const hashed = await hashPassword(password);
-            await store.setPassword(hashed);
+            await store.setPassword(authCheck.user.id, hashed);
             return { passwordSet: true };
           },
           {
@@ -165,17 +192,11 @@ export const createServer = ({
             return { error: "Unauthorized" };
           }
 
-          const config = await store.getConfig();
-          return toPublicConfig(config);
+          return toPublicConfig(authCheck.user);
         })
         .post(
           "/config",
           async ({ body, set, headers }) => {
-            const authCheck = await requireSession(headers, set);
-            if (!authCheck.ok) {
-              return { error: "Unauthorized" };
-            }
-
             const wakawarsUsername = normalizeUsername(body.wakawarsUsername);
             const apiKey = body.apiKey.trim();
 
@@ -189,17 +210,70 @@ export const createServer = ({
               return { error: "WakaTime API key is required" };
             }
 
-            const updated = await store.saveConfig({
+            const token = headers["x-wakawars-session"];
+            if (token) {
+              const userId = await sessions.getUserId(token);
+              if (!userId) {
+                set.status = 401;
+                return { error: "Unauthorized" };
+              }
+
+              const existing = await store.getUserByUsername(wakawarsUsername);
+              if (existing && existing.id !== userId) {
+                set.status = 409;
+                return { error: "Username already taken" };
+              }
+
+              const updated = await store.updateUser(userId, {
+                wakawarsUsername,
+                apiKey
+              });
+
+              return { config: toPublicConfig(updated) };
+            }
+
+            const existing = await store.getUserByUsername(wakawarsUsername);
+            if (existing) {
+              set.status = 409;
+              return { error: "Username already taken" };
+            }
+
+            const created = await store.createUser({
               wakawarsUsername,
               apiKey
             });
+            const sessionId = await sessions.create(created.id);
 
-            return toPublicConfig(updated);
+            return { sessionId, config: toPublicConfig(created) };
           },
           {
             body: t.Object({
               wakawarsUsername: t.String(),
               apiKey: t.String()
+            })
+          }
+        )
+        .get(
+          "/users/search",
+          async ({ query, headers, set }) => {
+            const authCheck = await requireSession(headers, set);
+            if (!authCheck.ok) {
+              return { error: "Unauthorized" };
+            }
+
+            const results = await store.searchUsers(query.q, {
+              excludeUserId: authCheck.user.id
+            });
+
+            return {
+              users: results.map((user) => ({
+                username: user.wakawarsUsername
+              }))
+            };
+          },
+          {
+            query: t.Object({
+              q: t.String()
             })
           }
         )
@@ -211,25 +285,30 @@ export const createServer = ({
               return { error: "Unauthorized" };
             }
 
-            const friendUsername = normalizeUsername(body.username);
-            const friendApiKey = body.apiKey?.trim() || null;
+            const friendUsername = normalizeFriendUsername(body.username);
 
             if (!friendUsername) {
               set.status = 400;
               return { error: "Friend username is required" };
             }
 
-            const updated = await store.addFriend({
-              username: friendUsername,
-              apiKey: friendApiKey
-            });
+            const friend = await store.getUserByUsername(friendUsername);
+            if (!friend) {
+              set.status = 404;
+              return { error: "Friend not found" };
+            }
+
+            if (friend.id === authCheck.user.id) {
+              return toPublicConfig(authCheck.user);
+            }
+
+            const updated = await store.addFriendship(authCheck.user.id, friend.id);
 
             return toPublicConfig(updated);
           },
           {
             body: t.Object({
-              username: t.String(),
-              apiKey: t.Optional(t.String())
+              username: t.String()
             })
           }
         )
@@ -241,9 +320,14 @@ export const createServer = ({
               return { error: "Unauthorized" };
             }
 
-            const friendUsername = normalizeUsername(params.username);
+            const friendUsername = normalizeFriendUsername(params.username);
 
-            const updated = await store.removeFriend(friendUsername);
+            const friend = await store.getUserByUsername(friendUsername);
+            if (!friend) {
+              return toPublicConfig(authCheck.user);
+            }
+
+            const updated = await store.removeFriendship(authCheck.user.id, friend.id);
 
             return toPublicConfig(updated);
           },
@@ -259,7 +343,11 @@ export const createServer = ({
             return { error: "Unauthorized" };
           }
 
-          const config = await store.getConfig();
+          const config = await store.getUserById(authCheck.user.id);
+          if (!config) {
+            set.status = 401;
+            return { error: "Unauthorized" };
+          }
 
           if (!config.wakawarsUsername || !config.apiKey) {
             set.status = 400;
@@ -275,7 +363,7 @@ export const createServer = ({
             ...config.friends.map((friend) => ({
               username: friend.username,
               wakatimeUsername: friend.username,
-              apiKey: friend.apiKey || config.apiKey
+              apiKey: friend.apiKey || ""
             }))
           ];
 

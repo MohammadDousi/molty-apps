@@ -20,7 +20,59 @@ type SessionState = {
   authenticated: boolean;
   passwordSet: boolean;
   wakawarsUsername?: string;
+  hasUser: boolean;
 };
+
+type AddFriendCardProps = {
+  docked?: boolean;
+  dismissible?: boolean;
+  onDismiss?: () => void;
+  friendInput: string;
+  onFriendInputChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  loading: boolean;
+  errorMessage?: string | null;
+};
+
+const AddFriendCard = ({
+  docked,
+  dismissible,
+  onDismiss,
+  friendInput,
+  onFriendInputChange,
+  onSubmit,
+  loading,
+  errorMessage,
+}: AddFriendCardProps) => (
+  <section className={`card ${docked ? "add-friend-dock" : ""}`}>
+    <div className="section-header">
+      <h2>Add a friend</h2>
+      {dismissible && (
+        <button
+          type="button"
+          className="icon-button small dismiss-button"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+        >
+          x
+        </button>
+      )}
+    </div>
+    <form className="row add-friend-row" onSubmit={onSubmit}>
+      <input
+        type="text"
+        value={friendInput}
+        onChange={(event) => onFriendInputChange(event.target.value)}
+        placeholder="username"
+        disabled={loading}
+      />
+      <button className="primary" type="submit" disabled={loading}>
+        Add
+      </button>
+    </form>
+    {errorMessage && <p className="form-error">{errorMessage}</p>}
+  </section>
+);
 
 const App = () => {
   const [apiBase, setApiBase] = useState<string | null>(null);
@@ -36,6 +88,7 @@ const App = () => {
   const [login, setLogin] = useState(initialLoginState);
   const [passwordForm, setPasswordForm] = useState(initialPasswordState);
   const [friendInput, setFriendInput] = useState("");
+  const [addFriendError, setAddFriendError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"league" | "settings">("league");
   const [showDockedAddFriend, setShowDockedAddFriend] = useState(true);
   const [launchAtLogin, setLaunchAtLogin] = useState<boolean | null>(null);
@@ -50,9 +103,7 @@ const App = () => {
     return "dark";
   });
 
-  const isAuthenticated = Boolean(
-    session?.authenticated || (!session?.passwordSet && session)
-  );
+  const isAuthenticated = Boolean(session?.authenticated);
   const isConfigured = Boolean(config?.wakawarsUsername && config?.hasApiKey);
 
   const request = useCallback(
@@ -93,7 +144,7 @@ const App = () => {
     try {
       const payload = await request<SessionState>("/session");
       setSession(payload);
-      if (payload.passwordSet && !payload.authenticated) {
+      if (!payload.authenticated) {
         setSessionId(null);
         localStorage.removeItem("wakawarsSession");
       }
@@ -104,6 +155,7 @@ const App = () => {
   }, [request]);
 
   const loadConfig = useCallback(async () => {
+    if (!isAuthenticated) return;
     try {
       const payload = await request<PublicConfig>("/config");
       setConfig(payload);
@@ -111,7 +163,7 @@ const App = () => {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load config");
     }
-  }, [request]);
+  }, [isAuthenticated, request]);
 
   const loadStats = useCallback(
     async (silent = false) => {
@@ -153,7 +205,7 @@ const App = () => {
 
     const defaultBase = import.meta.env.DEV
       ? "http://localhost:3000/wakawars/v0"
-      : "https://wakawars.molty.cool/wakawars/v0";
+      : "https://wakawars.molty.app/wakawars/v0";
     setApiBase(defaultBase);
   }, []);
 
@@ -177,7 +229,7 @@ const App = () => {
 
   useEffect(() => {
     if (!session) return;
-    if (!session.passwordSet || session.authenticated) {
+    if (session.authenticated) {
       loadConfig();
     }
   }, [session, loadConfig]);
@@ -209,14 +261,26 @@ const App = () => {
     event.preventDefault();
     setLoading(true);
     try {
-      const payload = await request<PublicConfig>("/config", {
+      const payload = await request<{
+        sessionId?: string;
+        config: PublicConfig;
+      }>("/config", {
         method: "POST",
         body: JSON.stringify(onboarding),
       });
-      setConfig(payload);
+      setConfig(payload.config);
+      if (payload.sessionId) {
+        setSessionId(payload.sessionId);
+        localStorage.setItem("wakawarsSession", payload.sessionId);
+        setSession({
+          authenticated: true,
+          passwordSet: false,
+          wakawarsUsername: payload.config.wakawarsUsername,
+          hasUser: true,
+        });
+      }
       setOnboarding(initialOnboardingState);
       setError(null);
-      await loadSession();
       await loadStats(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save config");
@@ -232,6 +296,7 @@ const App = () => {
       const payload = await request<{
         sessionId: string;
         wakawarsUsername: string;
+        passwordSet: boolean;
       }>("/session/login", {
         method: "POST",
         body: JSON.stringify({
@@ -243,8 +308,9 @@ const App = () => {
       localStorage.setItem("wakawarsSession", payload.sessionId);
       setSession({
         authenticated: true,
-        passwordSet: true,
+        passwordSet: payload.passwordSet,
         wakawarsUsername: payload.wakawarsUsername,
+        hasUser: true,
       });
       setLogin(initialLoginState);
       setError(null);
@@ -270,26 +336,16 @@ const App = () => {
         method: "POST",
         body: JSON.stringify({ password: passwordForm.password }),
       });
-
-      if (config?.wakawarsUsername) {
-        const loginPayload = await request<{
-          sessionId: string;
-          wakawarsUsername: string;
-        }>("/session/login", {
-          method: "POST",
-          body: JSON.stringify({
-            username: config.wakawarsUsername,
-            password: passwordForm.password,
-          }),
-        });
-        setSessionId(loginPayload.sessionId);
-        localStorage.setItem("wakawarsSession", loginPayload.sessionId);
-        setSession({
-          authenticated: true,
-          passwordSet: true,
-          wakawarsUsername: loginPayload.wakawarsUsername,
-        });
-      }
+      setSession((prev) =>
+        prev
+          ? {
+              ...prev,
+              authenticated: true,
+              passwordSet: true,
+              hasUser: true,
+            }
+          : prev
+      );
 
       setPasswordForm(initialPasswordState);
       await loadConfig();
@@ -307,6 +363,7 @@ const App = () => {
     if (!friendInput.trim()) return;
 
     setLoading(true);
+    setAddFriendError(null);
     try {
       const payload = await request<PublicConfig>("/friends", {
         method: "POST",
@@ -317,9 +374,17 @@ const App = () => {
       setConfig(payload);
       setFriendInput("");
       setError(null);
+      setAddFriendError(null);
       await loadStats(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add friend");
+      const message =
+        err instanceof Error ? err.message : "Failed to add friend";
+      if (message === "Friend not found") {
+        setAddFriendError(message);
+        setError(null);
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -362,25 +427,6 @@ const App = () => {
     }
   };
 
-  const handleRemoveFriend = async (username: string) => {
-    setLoading(true);
-    try {
-      const payload = await request<PublicConfig>(
-        `/friends/${encodeURIComponent(username)}`,
-        {
-          method: "DELETE",
-        }
-      );
-      setConfig(payload);
-      setError(null);
-      await loadStats(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to remove friend");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleRetry = () => {
     setError(null);
     loadSession();
@@ -394,8 +440,8 @@ const App = () => {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }, [stats?.updatedAt]);
 
-  const showLogin = Boolean(session?.passwordSet && !session?.authenticated);
-  const canShowSettings = Boolean(isConfigured && !showLogin);
+  const showLogin = Boolean(session?.hasUser && !session?.authenticated);
+  const canShowSettings = Boolean(isConfigured && isAuthenticated);
   const showSettings = Boolean(canShowSettings && activeTab === "settings");
   const passwordActionLabel = "Set password";
 
@@ -418,44 +464,6 @@ const App = () => {
 
   const showDockedAdd = Boolean(
     showDockedAddFriend && isConfigured && !showLogin && !showSettings
-  );
-
-  const AddFriendCard = ({
-    docked,
-    dismissible,
-    onDismiss,
-  }: {
-    docked?: boolean;
-    dismissible?: boolean;
-    onDismiss?: () => void;
-  }) => (
-    <section className={`card ${docked ? "add-friend-dock" : ""}`}>
-      <div className="section-header">
-        <h2>Add a friend</h2>
-        {dismissible && (
-          <button
-            type="button"
-            className="icon-button small dismiss-button"
-            onClick={onDismiss}
-            aria-label="Dismiss"
-          >
-            x
-          </button>
-        )}
-      </div>
-      <form className="row add-friend-row" onSubmit={handleAddFriend}>
-        <input
-          type="text"
-          value={friendInput}
-          onChange={(event) => setFriendInput(event.target.value)}
-          placeholder="username"
-          disabled={loading}
-        />
-        <button className="primary" type="submit" disabled={loading}>
-          Add
-        </button>
-      </form>
-    </section>
   );
 
   return (
@@ -527,8 +535,7 @@ const App = () => {
                     password: event.target.value,
                   }))
                 }
-                placeholder="password"
-                required
+                placeholder="password (optional)"
                 disabled={loading}
               />
             </label>
@@ -694,7 +701,18 @@ const App = () => {
             )}
           </section>
 
-          <AddFriendCard />
+          <AddFriendCard
+            friendInput={friendInput}
+            onFriendInputChange={(value) => {
+              setFriendInput(value);
+              if (addFriendError) {
+                setAddFriendError(null);
+              }
+            }}
+            onSubmit={handleAddFriend}
+            loading={loading}
+            errorMessage={addFriendError}
+          />
         </>
       ) : (
         <>
@@ -712,8 +730,6 @@ const App = () => {
                     key={entry.username}
                     entry={entry}
                     isSelf={entry.username === config?.wakawarsUsername}
-                    onRemove={handleRemoveFriend}
-                    disabled={loading}
                   />
                 ))}
               </div>
@@ -726,6 +742,16 @@ const App = () => {
               docked
               dismissible
               onDismiss={() => setShowDockedAddFriend(false)}
+              friendInput={friendInput}
+              onFriendInputChange={(value) => {
+                setFriendInput(value);
+                if (addFriendError) {
+                  setAddFriendError(null);
+                }
+              }}
+              onSubmit={handleAddFriend}
+              loading={loading}
+              errorMessage={addFriendError}
             />
           )}
         </>
@@ -734,12 +760,12 @@ const App = () => {
   );
 };
 
-const statusLabel = (entry: LeaderboardEntry): string => {
+const statusLabel = (entry: LeaderboardEntry): string | null => {
   if (entry.status === "ok") {
     return formatDuration(entry.totalSeconds);
   }
   if (entry.status === "private") {
-    return "Private";
+    return null;
   }
   if (entry.status === "not_found") {
     return "Not found";
@@ -750,13 +776,9 @@ const statusLabel = (entry: LeaderboardEntry): string => {
 const LeaderboardRow = ({
   entry,
   isSelf,
-  onRemove,
-  disabled,
 }: {
   entry: LeaderboardEntry;
   isSelf: boolean;
-  onRemove: (username: string) => void;
-  disabled: boolean;
 }) => {
   const medal =
     entry.rank === 1
@@ -769,29 +791,24 @@ const LeaderboardRow = ({
   const podiumClass =
     entry.rank && entry.rank <= 3 ? `podium podium-${entry.rank}` : "";
   const rankLabel = medal ?? (entry.rank ? `#${entry.rank}` : "—");
+  const timeLabel = statusLabel(entry);
 
   return (
     <div className={`row-item ${isSelf ? "self" : ""} ${podiumClass}`}>
-      <div className="avatar">{entry.username.slice(0, 1).toUpperCase()}</div>
-      <div className="row-content">
-        <div className="row-title">
-          <span>{entry.username}</span>
+      <div className="row-item-left">
+        <div className="avatar">{entry.username.slice(0, 1).toUpperCase()}</div>
+        <div className="row-content">
+          <div className="row-title">
+            <span>{entry.username}</span>
+            {isSelf && <span className="badge">YOU</span>}
+          </div>
         </div>
       </div>
       <div className="row-meta">
         <div className="row-meta-top">
           <span className="rank-display">{rankLabel}</span>
-          <span className="time">{statusLabel(entry)}</span>
+          {timeLabel && <span className="time">{timeLabel}</span>}
         </div>
-        {!isSelf && (
-          <button
-            className="ghost tiny"
-            onClick={() => onRemove(entry.username)}
-            disabled={disabled}
-          >
-            Remove
-          </button>
-        )}
       </div>
     </div>
   );
