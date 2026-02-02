@@ -1,13 +1,22 @@
 import { describe, expect, it } from "vitest";
-import type { UserConfig } from "@molty/shared";
+import type { DailyStatStatus, UserConfig } from "@molty/shared";
 import { createServer } from "../src/app.js";
 import type { UserRepository } from "../src/repository.js";
 
 type UserRecord = Omit<UserConfig, "friends">;
+type DailyStatRecord = {
+  userId: number;
+  dateKey: string;
+  totalSeconds: number;
+  status: DailyStatStatus;
+  error: string | null;
+  fetchedAt: Date;
+};
 
 const createMemoryRepository = (): UserRepository => {
   let users: UserRecord[] = [];
   let friendships: Array<{ userId: number; friendId: number }> = [];
+  let dailyStats: DailyStatRecord[] = [];
   let nextId = 1;
 
   const withFriends = (user: UserRecord): UserConfig => {
@@ -31,6 +40,12 @@ const createMemoryRepository = (): UserRepository => {
 
   return {
     countUsers: async () => users.length,
+    listUsers: async () =>
+      users.map((user) => ({
+        id: user.id,
+        wakawarsUsername: user.wakawarsUsername,
+        apiKey: user.apiKey
+      })),
     getUserById: async (userId) => {
       const user = findUser((entry) => entry.id === userId);
       return user ? withFriends(user) : null;
@@ -88,7 +103,32 @@ const createMemoryRepository = (): UserRepository => {
       return filtered
         .slice(0, options?.limit ?? filtered.length)
         .map((user) => ({ id: user.id, wakawarsUsername: user.wakawarsUsername }));
-    }
+    },
+    upsertDailyStat: async (input) => {
+      const existingIndex = dailyStats.findIndex(
+        (stat) => stat.userId === input.userId && stat.dateKey === input.dateKey
+      );
+      const record: DailyStatRecord = {
+        userId: input.userId,
+        dateKey: input.dateKey,
+        totalSeconds: input.totalSeconds,
+        status: input.status,
+        error: input.error ?? null,
+        fetchedAt: input.fetchedAt
+      };
+      if (existingIndex >= 0) {
+        dailyStats = dailyStats.map((stat, index) => (index === existingIndex ? record : stat));
+        return;
+      }
+      dailyStats = [...dailyStats, record];
+    },
+    getDailyStats: async ({ userIds, dateKey }) =>
+      dailyStats
+        .filter((stat) => userIds.includes(stat.userId) && stat.dateKey === dateKey)
+        .map((stat) => ({
+          ...stat,
+          username: users.find((user) => user.id === stat.userId)?.wakawarsUsername ?? ""
+        }))
   };
 };
 
@@ -105,7 +145,7 @@ describe("server app", () => {
     const { app } = createServer({
       port: 0,
       repository: createMemoryRepository(),
-      fetcher: async () => new Response()
+      enableStatusSync: false
     });
 
     const response = await app.handle(
@@ -138,27 +178,11 @@ describe("server app", () => {
   });
 
   it("adds friends and returns leaderboard stats", async () => {
-    const mockFetch = async (input: RequestInfo) => {
-      const url = typeof input === "string" ? input : input.url;
-      if (url.includes("/users/ben/status_bar/today")) {
-        return new Response(JSON.stringify({ data: { grand_total: { total_seconds: 1800 } } }), {
-          status: 200
-        });
-      }
-      if (url.includes("/users/amy/status_bar/today")) {
-        return new Response(JSON.stringify({ data: { grand_total: { total_seconds: 3600 } } }), {
-          status: 200
-        });
-      }
-      return new Response(JSON.stringify({ data: { grand_total: { total_seconds: 900 } } }), {
-        status: 200
-      });
-    };
-
-    const { app } = createServer({
+    const repository = createMemoryRepository();
+    const { app, store } = createServer({
       port: 0,
-      repository: createMemoryRepository(),
-      fetcher: mockFetch as typeof fetch
+      repository,
+      enableStatusSync: false
     });
 
     const { sessionId } = await getSessionId(
@@ -218,6 +242,36 @@ describe("server app", () => {
       })
     );
 
+    const dateKey = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const mo = await store.getUserByUsername("mo");
+    const amy = await store.getUserByUsername("amy");
+    const ben = await store.getUserByUsername("ben");
+    await store.upsertDailyStat({
+      userId: mo!.id,
+      dateKey,
+      totalSeconds: 900,
+      status: "ok",
+      error: null,
+      fetchedAt: now
+    });
+    await store.upsertDailyStat({
+      userId: amy!.id,
+      dateKey,
+      totalSeconds: 3600,
+      status: "ok",
+      error: null,
+      fetchedAt: now
+    });
+    await store.upsertDailyStat({
+      userId: ben!.id,
+      dateKey,
+      totalSeconds: 1800,
+      status: "ok",
+      error: null,
+      fetchedAt: now
+    });
+
     const statsResponse = await app.handle(
       new Request("http://localhost/wakawars/v0/stats/today", {
         headers: { "x-wakawars-session": sessionId ?? "" }
@@ -228,15 +282,10 @@ describe("server app", () => {
   });
 
   it("rejects unknown friends", async () => {
-    const mockFetch = async () =>
-      new Response(JSON.stringify({ data: { grand_total: { total_seconds: 900 } } }), {
-        status: 200
-      });
-
     const { app } = createServer({
       port: 0,
       repository: createMemoryRepository(),
-      fetcher: mockFetch as typeof fetch
+      enableStatusSync: false
     });
 
     const { sessionId } = await getSessionId(
@@ -267,20 +316,11 @@ describe("server app", () => {
   });
 
   it("marks private users when unauthorized", async () => {
-    const mockFetch = async (input: RequestInfo) => {
-      const url = typeof input === "string" ? input : input.url;
-      if (url.includes("/users/private/status_bar/today")) {
-        return new Response("", { status: 403 });
-      }
-      return new Response(JSON.stringify({ data: { grand_total: { total_seconds: 1200 } } }), {
-        status: 200
-      });
-    };
-
-    const { app } = createServer({
+    const repository = createMemoryRepository();
+    const { app, store } = createServer({
       port: 0,
-      repository: createMemoryRepository(),
-      fetcher: mockFetch as typeof fetch
+      repository,
+      enableStatusSync: false
     });
 
     const { sessionId } = await getSessionId(
@@ -317,6 +357,27 @@ describe("server app", () => {
         body: JSON.stringify({ username: "private" })
       })
     );
+
+    const dateKey = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const mo = await store.getUserByUsername("mo");
+    const privateUser = await store.getUserByUsername("private");
+    await store.upsertDailyStat({
+      userId: mo!.id,
+      dateKey,
+      totalSeconds: 1200,
+      status: "ok",
+      error: null,
+      fetchedAt: now
+    });
+    await store.upsertDailyStat({
+      userId: privateUser!.id,
+      dateKey,
+      totalSeconds: 0,
+      status: "private",
+      error: "User data is private or unauthorized",
+      fetchedAt: now
+    });
 
     const statsResponse = await app.handle(
       new Request("http://localhost/wakawars/v0/stats/today", {

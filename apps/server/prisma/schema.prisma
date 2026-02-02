@@ -40,3 +40,19 @@ model ww_session {
   created_at   DateTime @default(now())
   last_used_at DateTime @default(now())
 }
+
+model ww_daily_stat {
+  id            Int      @id @default(autoincrement())
+  user_id       Int
+  date_key      String
+  total_seconds Int      @default(0)
+  status        String
+  error         String?
+  fetched_at    DateTime @default(now())
+  user          ww_user  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  @@unique([user_id, date_key])
+  @@index([date_key])
+}

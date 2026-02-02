@@ -92,6 +92,9 @@ const App = () => {
   const [activeTab, setActiveTab] = useState<"league" | "settings">("league");
   const [showDockedAddFriend, setShowDockedAddFriend] = useState(true);
   const [launchAtLogin, setLaunchAtLogin] = useState<boolean | null>(null);
+  const [launchAtLoginStatus, setLaunchAtLoginStatus] = useState<string | null>(
+    null
+  );
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">(() => {
@@ -213,8 +216,14 @@ const App = () => {
     if (!window.molty?.getLoginItemSettings) return;
     window.molty
       .getLoginItemSettings()
-      .then((settings) => setLaunchAtLogin(settings.openAtLogin))
-      .catch(() => setLaunchAtLogin(null));
+      .then((settings) => {
+        setLaunchAtLogin(settings.openAtLogin);
+        setLaunchAtLoginStatus(settings.status ?? null);
+      })
+      .catch(() => {
+        setLaunchAtLogin(null);
+        setLaunchAtLoginStatus(null);
+      });
   }, []);
 
   useEffect(() => {
@@ -391,6 +400,7 @@ const App = () => {
   };
 
   const handleLaunchToggle = async (nextValue: boolean) => {
+    const previousValue = launchAtLogin;
     setLaunchAtLogin(nextValue);
     if (!window.molty?.setLoginItemSettings) {
       return;
@@ -399,7 +409,10 @@ const App = () => {
     try {
       const settings = await window.molty.setLoginItemSettings(nextValue);
       setLaunchAtLogin(settings.openAtLogin);
+      setLaunchAtLoginStatus(settings.status ?? null);
     } catch {
+      setLaunchAtLogin(previousValue);
+      setLaunchAtLoginStatus(null);
       setError("Unable to update settings.");
     }
   };
@@ -694,6 +707,12 @@ const App = () => {
               </button>
             </div>
             {updateStatus && <p className="muted">{updateStatus}</p>}
+            {launchAtLoginStatus === "requires-approval" && (
+              <p className="muted">
+                macOS needs approval in System Settings &gt; General &gt; Login
+                Items.
+              </p>
+            )}
             {launchAtLogin === null && (
               <p className="muted">
                 Launch at login is available in the macOS app.

@@ -1,8 +1,18 @@
 import type { PrismaClient } from "@prisma/client";
-import type { UserConfig } from "@molty/shared";
+import type { DailyStatStatus, UserConfig } from "@molty/shared";
+
+export type DailyStatRecord = {
+  userId: number;
+  username: string;
+  totalSeconds: number;
+  status: DailyStatStatus;
+  error: string | null;
+  fetchedAt: Date;
+};
 
 export type UserRepository = {
   countUsers: () => Promise<number>;
+  listUsers: () => Promise<Array<{ id: number; wakawarsUsername: string; apiKey: string }>>;
   getUserById: (userId: number) => Promise<UserConfig | null>;
   getUserByUsername: (username: string) => Promise<UserConfig | null>;
   createUser: (config: { wakawarsUsername: string; apiKey: string }) => Promise<UserConfig>;
@@ -17,6 +27,18 @@ export type UserRepository = {
     query: string,
     options?: { excludeUserId?: number; limit?: number }
   ) => Promise<Array<{ id: number; wakawarsUsername: string }>>;
+  upsertDailyStat: (input: {
+    userId: number;
+    dateKey: string;
+    totalSeconds: number;
+    status: DailyStatStatus;
+    error?: string | null;
+    fetchedAt: Date;
+  }) => Promise<void>;
+  getDailyStats: (input: {
+    userIds: number[];
+    dateKey: string;
+  }) => Promise<DailyStatRecord[]>;
 };
 
 type PrismaUser = {
@@ -56,6 +78,18 @@ const userInclude = {
 
 export const createPrismaRepository = (prisma: PrismaClient): UserRepository => {
   const countUsers = async () => prisma.ww_user.count();
+
+  const listUsers = async () => {
+    const users = await prisma.ww_user.findMany({
+      select: { id: true, wakawars_username: true, api_key: true }
+    });
+
+    return users.map((user) => ({
+      id: user.id,
+      wakawarsUsername: user.wakawars_username,
+      apiKey: user.api_key
+    }));
+  };
 
   const getUserById = async (userId: number) => {
     const user = await prisma.ww_user.findUnique({
@@ -198,8 +232,84 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     }));
   };
 
+  const upsertDailyStat = async ({
+    userId,
+    dateKey,
+    totalSeconds,
+    status,
+    error,
+    fetchedAt
+  }: {
+    userId: number;
+    dateKey: string;
+    totalSeconds: number;
+    status: DailyStatStatus;
+    error?: string | null;
+    fetchedAt: Date;
+  }) => {
+    await prisma.ww_daily_stat.upsert({
+      where: {
+        user_id_date_key: {
+          user_id: userId,
+          date_key: dateKey
+        }
+      },
+      create: {
+        user_id: userId,
+        date_key: dateKey,
+        total_seconds: totalSeconds,
+        status,
+        error: error ?? null,
+        fetched_at: fetchedAt
+      },
+      update: {
+        total_seconds: totalSeconds,
+        status,
+        error: error ?? null,
+        fetched_at: fetchedAt
+      }
+    });
+  };
+
+  const getDailyStats = async ({
+    userIds,
+    dateKey
+  }: {
+    userIds: number[];
+    dateKey: string;
+  }): Promise<DailyStatRecord[]> => {
+    if (userIds.length === 0) {
+      return [];
+    }
+
+    const stats = await prisma.ww_daily_stat.findMany({
+      where: {
+        user_id: { in: userIds },
+        date_key: dateKey
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            wakawars_username: true
+          }
+        }
+      }
+    });
+
+    return stats.map((stat) => ({
+      userId: stat.user_id,
+      username: stat.user.wakawars_username,
+      totalSeconds: stat.total_seconds,
+      status: stat.status as DailyStatStatus,
+      error: stat.error ?? null,
+      fetchedAt: stat.fetched_at
+    }));
+  };
+
   return {
     countUsers,
+    listUsers,
     getUserById,
     getUserByUsername,
     createUser,
@@ -207,6 +317,8 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     setPassword,
     addFriendship,
     removeFriendship,
-    searchUsers
+    searchUsers,
+    upsertDailyStat,
+    getDailyStats
   };
 };

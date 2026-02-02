@@ -3,6 +3,7 @@ import electron, {
   type Tray as TrayType,
 } from "electron";
 import electronUpdater from "electron-updater";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -33,6 +34,13 @@ const apiBaseReady = new Promise<string>((resolve) => {
 });
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
+const isMacOS13OrNewer =
+  process.platform === "darwin"
+    ? (() => {
+        const major = Number.parseInt(os.release().split(".")[0] ?? "0", 10);
+        return Number.isNaN(major) ? false : major >= 22;
+      })()
+    : false;
 
 const getTrayIconPath = () => {
   if (app.isPackaged) {
@@ -172,14 +180,30 @@ const resolveApiBaseReady = () => {
 };
 
 ipcMain.handle("get-api-base", () => apiBaseReady);
-ipcMain.handle("get-login-item-settings", () => app.getLoginItemSettings());
-ipcMain.handle("set-login-item-settings", (_event, openAtLogin: boolean) => {
-  app.setLoginItemSettings({
-    openAtLogin,
-    openAsHidden: true,
-  });
+const getLoginItemSettings = () => {
+  if (process.platform === "darwin" && isMacOS13OrNewer) {
+    return app.getLoginItemSettings({ type: "mainAppService" });
+  }
   return app.getLoginItemSettings();
-});
+};
+
+const setLoginItemSettings = (openAtLogin: boolean) => {
+  const settings: Electron.LoginItemSettings = { openAtLogin };
+  if (process.platform === "darwin") {
+    if (isMacOS13OrNewer) {
+      settings.type = "mainAppService";
+    } else {
+      settings.openAsHidden = true;
+    }
+  }
+  app.setLoginItemSettings(settings);
+  return getLoginItemSettings();
+};
+
+ipcMain.handle("get-login-item-settings", () => getLoginItemSettings());
+ipcMain.handle("set-login-item-settings", (_event, openAtLogin: boolean) =>
+  setLoginItemSettings(openAtLogin)
+);
 ipcMain.handle("check-for-updates", async () => {
   if (!app.isPackaged) {
     return { status: "disabled" };

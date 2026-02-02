@@ -9,6 +9,10 @@ import type {
   LeaderboardResponse,
 } from "@molty/shared";
 import { createWakaTimeClient } from "./wakatime.js";
+import {
+  createWakaTimeSync,
+  DEFAULT_WAKATIME_SYNC_INTERVAL_MS,
+} from "./wakatime-sync.js";
 import { createPrismaClient } from "./db.js";
 import { createPrismaRepository, type UserRepository } from "./repository.js";
 import { hashPassword, verifyPassword } from "./auth.js";
@@ -25,6 +29,8 @@ export type ServerOptions = {
   databaseUrl?: string;
   repository?: UserRepository;
   sessionStore?: SessionStore;
+  enableStatusSync?: boolean;
+  statusSyncIntervalMs?: number;
 };
 
 const toPublicConfig = (config: UserConfig): PublicConfig => ({
@@ -61,6 +67,8 @@ export const createServer = ({
   databaseUrl,
   repository,
   sessionStore,
+  enableStatusSync,
+  statusSyncIntervalMs,
 }: ServerOptions) => {
   const prisma = repository ? null : createPrismaClient(databaseUrl);
   const store = repository ?? createPrismaRepository(prisma!);
@@ -68,6 +76,12 @@ export const createServer = ({
   const sessions =
     sessionStore ??
     (prisma ? createPrismaSessionStore(prisma) : createMemorySessionStore());
+  const statusSync = createWakaTimeSync({
+    store,
+    wakatime,
+    intervalMs: statusSyncIntervalMs ?? DEFAULT_WAKATIME_SYNC_INTERVAL_MS,
+  });
+  const shouldSync = enableStatusSync ?? true;
 
   const requireSession = async (
     headers: Record<string, string | undefined>,
@@ -372,50 +386,50 @@ export const createServer = ({
 
           const users = [
             {
+              id: config.id,
               username: config.wakawarsUsername,
-              wakatimeUsername: "current",
-              apiKey: config.apiKey,
             },
             ...config.friends.map((friend) => ({
+              id: friend.id,
               username: friend.username,
-              wakatimeUsername: friend.username,
-              apiKey: friend.apiKey || "",
             })),
           ];
 
-          const results = await Promise.all(
-            users.map(async (user) => {
-              if (!user.apiKey) {
-                return {
-                  username: user.username,
-                  status: "error",
-                  totalSeconds: 0,
-                  error: "Missing API key",
-                  fetchedAt: Date.now(),
-                } as const;
-              }
-
-              return wakatime.getStatusBarToday(
-                user.wakatimeUsername,
-                user.apiKey
-              );
-            })
+          const dateKey = new Date().toISOString().slice(0, 10);
+          const dailyStats = await store.getDailyStats({
+            userIds: users.map((user) => user.id),
+            dateKey,
+          });
+          const statsByUserId = new Map(
+            dailyStats.map((stat) => [stat.userId, stat])
           );
 
-          const stats: DailyStat[] = results.map((result, index) => ({
-            username: users[index].username,
-            totalSeconds: result.totalSeconds,
-            status: result.status,
-            error: result.error ?? null,
-          }));
+          const stats: DailyStat[] = users.map((user) => {
+            const stat = statsByUserId.get(user.id);
+            if (!stat) {
+              return {
+                username: user.username,
+                totalSeconds: 0,
+                status: "error",
+                error: "No stats synced yet",
+              };
+            }
+
+            return {
+              username: user.username,
+              totalSeconds: stat.totalSeconds,
+              status: stat.status,
+              error: stat.error ?? null,
+            };
+          });
 
           const entries = computeLeaderboard(stats, config.wakawarsUsername);
-          const updatedAtEpoch = Math.max(
-            ...results.map((result) => result.fetchedAt)
-          );
+          const updatedAtEpoch = dailyStats.length
+            ? Math.max(...dailyStats.map((stat) => stat.fetchedAt.getTime()))
+            : Date.now();
 
           const response: LeaderboardResponse = {
-            date: new Date().toISOString().slice(0, 10),
+            date: dateKey,
             updatedAt: new Date(updatedAtEpoch).toISOString(),
             entries,
           };
@@ -426,6 +440,9 @@ export const createServer = ({
 
   const listen = () => {
     app.listen({ port, hostname });
+    if (shouldSync) {
+      statusSync.start();
+    }
     return app;
   };
 
@@ -439,8 +456,9 @@ export const createServer = ({
     if (app.server) {
       await new Promise<void>((resolve) => app.server?.close(() => resolve()));
     }
+    statusSync.stop();
     await disconnect();
   };
 
-  return { app, listen, store, disconnect, close };
+  return { app, listen, store, disconnect, close, statusSync };
 };
