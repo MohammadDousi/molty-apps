@@ -2,7 +2,12 @@ import { Elysia, t } from "elysia";
 import { cors } from "@elysiajs/cors";
 import { node } from "@elysiajs/node";
 import { computeLeaderboard } from "@molty/shared";
-import type { PublicConfig, UserConfig, DailyStat, LeaderboardResponse } from "@molty/shared";
+import type {
+  PublicConfig,
+  UserConfig,
+  DailyStat,
+  LeaderboardResponse,
+} from "@molty/shared";
 import { createWakaTimeClient } from "./wakatime.js";
 import { createPrismaClient } from "./db.js";
 import { createPrismaRepository, type UserRepository } from "./repository.js";
@@ -10,7 +15,7 @@ import { hashPassword, verifyPassword } from "./auth.js";
 import {
   createMemorySessionStore,
   createPrismaSessionStore,
-  type SessionStore
+  type SessionStore,
 } from "./session-store.js";
 
 export type ServerOptions = {
@@ -25,10 +30,10 @@ export type ServerOptions = {
 const toPublicConfig = (config: UserConfig): PublicConfig => ({
   wakawarsUsername: config.wakawarsUsername,
   friends: config.friends.map((friend) => ({
-    username: friend.username
+    username: friend.username,
   })),
   hasApiKey: Boolean(config.apiKey),
-  passwordSet: Boolean(config.passwordHash)
+  passwordSet: Boolean(config.passwordHash),
 });
 
 const normalizeUsername = (value: string): string => value.trim().toLowerCase();
@@ -37,26 +42,32 @@ const normalizeFriendUsername = (value: string): string => {
   const trimmed = value.trim();
   if (!trimmed) return "";
 
-  const withoutProtocol = trimmed.replace(/^https?:\/\//i, "").replace(/^www\./i, "");
-  const withoutQuery = withoutProtocol.split("?")[0]?.split("#")[0] ?? withoutProtocol;
+  const withoutProtocol = trimmed
+    .replace(/^https?:\/\//i, "")
+    .replace(/^www\./i, "");
+  const withoutQuery =
+    withoutProtocol.split("?")[0]?.split("#")[0] ?? withoutProtocol;
   const segments = withoutQuery.split("/").filter(Boolean);
-  const lastSegment = segments.length ? segments[segments.length - 1] : withoutQuery;
+  const lastSegment = segments.length
+    ? segments[segments.length - 1]
+    : withoutQuery;
   return normalizeUsername(lastSegment.replace(/^@/, ""));
 };
 
 export const createServer = ({
   port,
-  hostname = "localhost",
+  hostname,
   fetcher,
   databaseUrl,
   repository,
-  sessionStore
+  sessionStore,
 }: ServerOptions) => {
   const prisma = repository ? null : createPrismaClient(databaseUrl);
   const store = repository ?? createPrismaRepository(prisma!);
   const wakatime = createWakaTimeClient({ fetcher });
   const sessions =
-    sessionStore ?? (prisma ? createPrismaSessionStore(prisma) : createMemorySessionStore());
+    sessionStore ??
+    (prisma ? createPrismaSessionStore(prisma) : createMemorySessionStore());
 
   const requireSession = async (
     headers: Record<string, string | undefined>,
@@ -87,7 +98,7 @@ export const createServer = ({
     .use(
       cors({
         origin: true,
-        methods: ["GET", "POST", "DELETE"]
+        methods: ["GET", "POST", "DELETE"],
       })
     )
     .get("/health", () => ({ status: "ok", apps: ["wakawars"] }))
@@ -105,7 +116,7 @@ export const createServer = ({
                   authenticated: true,
                   passwordSet: Boolean(user.passwordHash),
                   wakawarsUsername: user.wakawarsUsername,
-                  hasUser: true
+                  hasUser: true,
                 };
               }
             }
@@ -115,7 +126,7 @@ export const createServer = ({
           return {
             authenticated: false,
             passwordSet: false,
-            hasUser
+            hasUser,
           };
         })
         .post(
@@ -145,14 +156,14 @@ export const createServer = ({
             return {
               sessionId,
               wakawarsUsername: user.wakawarsUsername,
-              passwordSet: Boolean(user.passwordHash)
+              passwordSet: Boolean(user.passwordHash),
             };
           },
           {
             body: t.Object({
               username: t.String(),
-              password: t.String()
-            })
+              password: t.String(),
+            }),
           }
         )
         .post("/session/logout", async ({ headers }) => {
@@ -182,8 +193,8 @@ export const createServer = ({
           },
           {
             body: t.Object({
-              password: t.String()
-            })
+              password: t.String(),
+            }),
           }
         )
         .get("/config", async ({ headers, set }) => {
@@ -226,7 +237,7 @@ export const createServer = ({
 
               const updated = await store.updateUser(userId, {
                 wakawarsUsername,
-                apiKey
+                apiKey,
               });
 
               return { config: toPublicConfig(updated) };
@@ -240,7 +251,7 @@ export const createServer = ({
 
             const created = await store.createUser({
               wakawarsUsername,
-              apiKey
+              apiKey,
             });
             const sessionId = await sessions.create(created.id);
 
@@ -249,8 +260,8 @@ export const createServer = ({
           {
             body: t.Object({
               wakawarsUsername: t.String(),
-              apiKey: t.String()
-            })
+              apiKey: t.String(),
+            }),
           }
         )
         .get(
@@ -262,19 +273,19 @@ export const createServer = ({
             }
 
             const results = await store.searchUsers(query.q, {
-              excludeUserId: authCheck.user.id
+              excludeUserId: authCheck.user.id,
             });
 
             return {
               users: results.map((user) => ({
-                username: user.wakawarsUsername
-              }))
+                username: user.wakawarsUsername,
+              })),
             };
           },
           {
             query: t.Object({
-              q: t.String()
-            })
+              q: t.String(),
+            }),
           }
         )
         .post(
@@ -302,14 +313,17 @@ export const createServer = ({
               return toPublicConfig(authCheck.user);
             }
 
-            const updated = await store.addFriendship(authCheck.user.id, friend.id);
+            const updated = await store.addFriendship(
+              authCheck.user.id,
+              friend.id
+            );
 
             return toPublicConfig(updated);
           },
           {
             body: t.Object({
-              username: t.String()
-            })
+              username: t.String(),
+            }),
           }
         )
         .delete(
@@ -327,14 +341,17 @@ export const createServer = ({
               return toPublicConfig(authCheck.user);
             }
 
-            const updated = await store.removeFriendship(authCheck.user.id, friend.id);
+            const updated = await store.removeFriendship(
+              authCheck.user.id,
+              friend.id
+            );
 
             return toPublicConfig(updated);
           },
           {
             params: t.Object({
-              username: t.String()
-            })
+              username: t.String(),
+            }),
           }
         )
         .get("/stats/today", async ({ set, headers }) => {
@@ -358,13 +375,13 @@ export const createServer = ({
             {
               username: config.wakawarsUsername,
               wakatimeUsername: "current",
-              apiKey: config.apiKey
+              apiKey: config.apiKey,
             },
             ...config.friends.map((friend) => ({
               username: friend.username,
               wakatimeUsername: friend.username,
-              apiKey: friend.apiKey || ""
-            }))
+              apiKey: friend.apiKey || "",
+            })),
           ];
 
           const results = await Promise.all(
@@ -375,11 +392,14 @@ export const createServer = ({
                   status: "error",
                   totalSeconds: 0,
                   error: "Missing API key",
-                  fetchedAt: Date.now()
+                  fetchedAt: Date.now(),
                 } as const;
               }
 
-              return wakatime.getStatusBarToday(user.wakatimeUsername, user.apiKey);
+              return wakatime.getStatusBarToday(
+                user.wakatimeUsername,
+                user.apiKey
+              );
             })
           );
 
@@ -387,16 +407,18 @@ export const createServer = ({
             username: users[index].username,
             totalSeconds: result.totalSeconds,
             status: result.status,
-            error: result.error ?? null
+            error: result.error ?? null,
           }));
 
           const entries = computeLeaderboard(stats, config.wakawarsUsername);
-          const updatedAtEpoch = Math.max(...results.map((result) => result.fetchedAt));
+          const updatedAtEpoch = Math.max(
+            ...results.map((result) => result.fetchedAt)
+          );
 
           const response: LeaderboardResponse = {
             date: new Date().toISOString().slice(0, 10),
             updatedAt: new Date(updatedAtEpoch).toISOString(),
-            entries
+            entries,
           };
 
           return response;
