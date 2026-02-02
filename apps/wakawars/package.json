@@ -88,7 +88,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://wakawars.molty.cool/updates"
+        "url": "https://core.molty.cool/updates"
       }
     ]
   }

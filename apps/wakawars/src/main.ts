@@ -24,7 +24,7 @@ const __dirname = path.dirname(__filename);
 let tray: TrayType | null = null;
 let mainWindow: BrowserWindowType | null = null;
 const apiBase = app.isPackaged
-  ? "https://wakawars.molty.cool/wakawars/v0"
+  ? "https://core.molty.cool/wakawars/v0"
   : "http://localhost:3000/wakawars/v0";
 let resolveApiBase: ((value: string) => void) | null = null;
 

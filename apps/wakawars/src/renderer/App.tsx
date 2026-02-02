@@ -205,7 +205,7 @@ const App = () => {
 
     const defaultBase = import.meta.env.DEV
       ? "http://localhost:3000/wakawars/v0"
-      : "https://wakawars.molty.cool/wakawars/v0";
+      : "https://core.molty.cool/wakawars/v0";
     setApiBase(defaultBase);
   }, []);
 
