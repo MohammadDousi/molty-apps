@@ -6,8 +6,16 @@ import electronUpdater from "electron-updater";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, screen, nativeTheme } =
-  electron;
+const {
+  app,
+  BrowserWindow,
+  Menu,
+  Tray,
+  ipcMain,
+  nativeImage,
+  screen,
+  nativeTheme,
+} = electron;
 const { autoUpdater } = electronUpdater;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -16,7 +24,7 @@ const __dirname = path.dirname(__filename);
 let tray: TrayType | null = null;
 let mainWindow: BrowserWindowType | null = null;
 const apiBase = app.isPackaged
-  ? "https://wakawars.molty.app/wakawars/v0"
+  ? "https://wakawars.molty.cool/wakawars/v0"
   : "http://localhost:3000/wakawars/v0";
 let resolveApiBase: ((value: string) => void) | null = null;
 
