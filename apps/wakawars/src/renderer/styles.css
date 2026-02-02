@@ -13,6 +13,20 @@
   --radius: 16px;
 }
 
+:root[data-theme="light"] {
+  --bg: #f3f6fb;
+  --bg-accent: #e7edf6;
+  --panel: rgba(255, 255, 255, 0.9);
+  --panel-strong: rgba(255, 255, 255, 0.98);
+  --text: #0f172a;
+  --muted: #5b6b82;
+  --accent: #0ea5a4;
+  --accent-soft: rgba(14, 165, 164, 0.15);
+  --danger: #d73a49;
+  --border: rgba(15, 23, 42, 0.12);
+  --shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -23,6 +37,10 @@ body {
   color: var(--text);
   background: radial-gradient(circle at top, #162338, var(--bg));
   -webkit-font-smoothing: antialiased;
+}
+
+:root[data-theme="light"] body {
+  background: radial-gradient(circle at top, #ffffff, var(--bg));
 }
 
 #root {
@@ -105,6 +123,9 @@ body {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.2s ease;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .add-friend-dock:hover .dismiss-button {
@@ -165,6 +186,16 @@ input {
 
 input::placeholder {
   color: rgba(142, 160, 184, 0.6);
+}
+
+:root[data-theme="light"] input {
+  background: #eef2f8;
+  border-color: rgba(15, 23, 42, 0.12);
+  color: var(--text);
+}
+
+:root[data-theme="light"] input::placeholder {
+  color: rgba(91, 107, 130, 0.7);
 }
 
 .row {
@@ -288,6 +319,15 @@ button.ghost {
   padding: 4px 8px;
 }
 
+:root[data-theme="light"] button.primary {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+:root[data-theme="light"] button.ghost {
+  color: var(--accent);
+}
+
 button.ghost.tiny {
   font-size: 9px;
   padding: 3px 6px;
@@ -322,6 +362,19 @@ button.icon-button.small {
   width: 22px;
   height: 22px;
   font-size: 12px;
+}
+
+:root[data-theme="light"] button.icon-button {
+  background: #e7edf6;
+  border-color: rgba(15, 23, 42, 0.15);
+  color: #1f2937;
+  box-shadow: none;
+}
+
+:root[data-theme="light"] button.icon-button.active {
+  background: rgba(14, 165, 164, 0.2);
+  color: var(--accent);
+  border-color: rgba(14, 165, 164, 0.35);
 }
 
 .settings-row {

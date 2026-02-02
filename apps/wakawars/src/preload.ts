@@ -6,5 +6,6 @@ contextBridge.exposeInMainWorld("molty", {
   getApiBase: () => ipcRenderer.invoke("get-api-base"),
   getLoginItemSettings: () => ipcRenderer.invoke("get-login-item-settings"),
   setLoginItemSettings: (openAtLogin: boolean) =>
-    ipcRenderer.invoke("set-login-item-settings", openAtLogin)
+    ipcRenderer.invoke("set-login-item-settings", openAtLogin),
+  checkForUpdates: () => ipcRenderer.invoke("check-for-updates")
 });

@@ -1,9 +1,13 @@
-import electron, { type BrowserWindow as BrowserWindowType, type Tray as TrayType } from "electron";
+import electron, {
+  type BrowserWindow as BrowserWindowType,
+  type Tray as TrayType,
+} from "electron";
 import electronUpdater from "electron-updater";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, screen } = electron;
+const { app, BrowserWindow, Menu, Tray, ipcMain, nativeImage, screen } =
+  electron;
 const { autoUpdater } = electronUpdater;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -12,7 +16,7 @@ const __dirname = path.dirname(__filename);
 let tray: TrayType | null = null;
 let mainWindow: BrowserWindowType | null = null;
 const apiBase = app.isPackaged
-  ? "https://wakawars.molty.app/wakawars/v0"
+  ? "https://wakawars.molty.cool/wakawars/v0"
   : "http://localhost:3000/wakawars/v0";
 let resolveApiBase: ((value: string) => void) | null = null;
 
@@ -36,7 +40,6 @@ const createTrayIcon = () => {
   return icon;
 };
 
-
 const createWindow = () => {
   const preloadPath = path.join(__dirname, "preload.js");
 
@@ -51,8 +54,8 @@ const createWindow = () => {
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
-      nodeIntegration: false
-    }
+      nodeIntegration: false,
+    },
   });
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
@@ -76,14 +79,20 @@ const positionWindow = () => {
 
   const trayBounds = tray.getBounds();
   const windowBounds = mainWindow.getBounds();
-  const display = screen.getDisplayNearestPoint({ x: trayBounds.x, y: trayBounds.y });
+  const display = screen.getDisplayNearestPoint({
+    x: trayBounds.x,
+    y: trayBounds.y,
+  });
 
-  const x = Math.round(trayBounds.x + trayBounds.width / 2 - windowBounds.width / 2);
+  const x = Math.round(
+    trayBounds.x + trayBounds.width / 2 - windowBounds.width / 2
+  );
   const y = Math.round(trayBounds.y + trayBounds.height + 6);
 
   const minX = display.bounds.x + 8;
   const maxX = display.bounds.x + display.bounds.width - windowBounds.width - 8;
-  const maxY = display.bounds.y + display.bounds.height - windowBounds.height - 8;
+  const maxY =
+    display.bounds.y + display.bounds.height - windowBounds.height - 8;
 
   const clampedX = Math.min(Math.max(x, minX), maxX);
   const clampedY = Math.min(y, maxY);
@@ -113,7 +122,7 @@ const createTray = () => {
     const menu = Menu.buildFromTemplate([
       { label: "Open", click: () => toggleWindow() },
       { type: "separator" },
-      { role: "quit" }
+      { role: "quit" },
     ]);
     tray?.popUpContextMenu(menu);
   });
@@ -139,9 +148,24 @@ ipcMain.handle("get-login-item-settings", () => app.getLoginItemSettings());
 ipcMain.handle("set-login-item-settings", (_event, openAtLogin: boolean) => {
   app.setLoginItemSettings({
     openAtLogin,
-    openAsHidden: true
+    openAsHidden: true,
   });
   return app.getLoginItemSettings();
+});
+ipcMain.handle("check-for-updates", async () => {
+  if (!app.isPackaged) {
+    return { status: "disabled" };
+  }
+
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    return { status: result?.updateInfo?.version ? "checked" : "checked" };
+  } catch (error) {
+    return {
+      status: "error",
+      error: error instanceof Error ? error.message : "Update failed",
+    };
+  }
 });
 
 app.whenReady().then(async () => {

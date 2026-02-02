@@ -1,5 +1,15 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import type { LeaderboardResponse, PublicConfig, LeaderboardEntry } from "@molty/shared";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
+import type {
+  LeaderboardResponse,
+  PublicConfig,
+  LeaderboardEntry,
+} from "@molty/shared";
 import { formatDuration } from "@molty/shared";
 
 const initialOnboardingState = { wakawarsUsername: "", apiKey: "" };
@@ -29,8 +39,20 @@ const App = () => {
   const [activeTab, setActiveTab] = useState<"league" | "settings">("league");
   const [showDockedAddFriend, setShowDockedAddFriend] = useState(true);
   const [launchAtLogin, setLaunchAtLogin] = useState<boolean | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    const stored = localStorage.getItem("wakawarsTheme");
+    if (stored === "light" || stored === "dark") return stored;
+    if (window.matchMedia?.("(prefers-color-scheme: light)").matches) {
+      return "light";
+    }
+    return "dark";
+  });
 
-  const isAuthenticated = Boolean(session?.authenticated || (!session?.passwordSet && session));
+  const isAuthenticated = Boolean(
+    session?.authenticated || (!session?.passwordSet && session)
+  );
   const isConfigured = Boolean(config?.wakawarsUsername && config?.hasApiKey);
 
   const request = useCallback(
@@ -45,13 +67,14 @@ const App = () => {
           headers: {
             "content-type": "application/json",
             ...(sessionId ? { "x-wakawars-session": sessionId } : {}),
-            ...(options?.headers || {})
-          }
+            ...(options?.headers || {}),
+          },
         });
 
         if (!response.ok) {
           const payload = await response.json().catch(() => null);
-          const message = payload?.error || `Request failed (${response.status})`;
+          const message =
+            payload?.error || `Request failed (${response.status})`;
           throw new Error(message);
         }
 
@@ -92,22 +115,22 @@ const App = () => {
 
   const loadStats = useCallback(
     async (silent = false) => {
-    if (!isConfigured || !isAuthenticated) return;
-    if (!silent) {
-      setLoading(true);
-    }
-    try {
-      const payload = await request<LeaderboardResponse>("/stats/today");
-      setStats(payload);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load stats");
-    } finally {
+      if (!isConfigured || !isAuthenticated) return;
       if (!silent) {
-        setLoading(false);
+        setLoading(true);
       }
-    }
-  },
+      try {
+        const payload = await request<LeaderboardResponse>("/stats/today");
+        setStats(payload);
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load stats");
+      } finally {
+        if (!silent) {
+          setLoading(false);
+        }
+      }
+    },
     [isConfigured, isAuthenticated, request]
   );
 
@@ -122,13 +145,15 @@ const App = () => {
       window.molty
         .getApiBase()
         .then((base) => setApiBase(base))
-        .catch((err) => setError(err instanceof Error ? err.message : "Network error"));
+        .catch((err) =>
+          setError(err instanceof Error ? err.message : "Network error")
+        );
       return;
     }
 
     const defaultBase = import.meta.env.DEV
       ? "http://localhost:3000/wakawars/v0"
-      : "https://wakawars.molty.app/wakawars/v0";
+      : "https://wakawars.molty.cool/wakawars/v0";
     setApiBase(defaultBase);
   }, []);
 
@@ -139,6 +164,11 @@ const App = () => {
       .then((settings) => setLaunchAtLogin(settings.openAtLogin))
       .catch(() => setLaunchAtLogin(null));
   }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("wakawarsTheme", theme);
+  }, [theme]);
 
   useEffect(() => {
     if (!apiBase) return;
@@ -168,7 +198,10 @@ const App = () => {
 
   useEffect(() => {
     if (session?.wakawarsUsername && !login.username) {
-      setLogin((prev) => ({ ...prev, username: session.wakawarsUsername ?? prev.username }));
+      setLogin((prev) => ({
+        ...prev,
+        username: session.wakawarsUsername ?? prev.username,
+      }));
     }
   }, [session?.wakawarsUsername, login.username]);
 
@@ -178,7 +211,7 @@ const App = () => {
     try {
       const payload = await request<PublicConfig>("/config", {
         method: "POST",
-        body: JSON.stringify(onboarding)
+        body: JSON.stringify(onboarding),
       });
       setConfig(payload);
       setOnboarding(initialOnboardingState);
@@ -196,22 +229,22 @@ const App = () => {
     event.preventDefault();
     setLoading(true);
     try {
-      const payload = await request<{ sessionId: string; wakawarsUsername: string }>(
-        "/session/login",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            username: login.username,
-            password: login.password
-          })
-        }
-      );
+      const payload = await request<{
+        sessionId: string;
+        wakawarsUsername: string;
+      }>("/session/login", {
+        method: "POST",
+        body: JSON.stringify({
+          username: login.username,
+          password: login.password,
+        }),
+      });
       setSessionId(payload.sessionId);
       localStorage.setItem("wakawarsSession", payload.sessionId);
       setSession({
         authenticated: true,
         passwordSet: true,
-        wakawarsUsername: payload.wakawarsUsername
+        wakawarsUsername: payload.wakawarsUsername,
       });
       setLogin(initialLoginState);
       setError(null);
@@ -235,26 +268,26 @@ const App = () => {
     try {
       await request<{ passwordSet: boolean }>("/password", {
         method: "POST",
-        body: JSON.stringify({ password: passwordForm.password })
+        body: JSON.stringify({ password: passwordForm.password }),
       });
 
       if (config?.wakawarsUsername) {
-        const loginPayload = await request<{ sessionId: string; wakawarsUsername: string }>(
-          "/session/login",
-          {
-            method: "POST",
-            body: JSON.stringify({
-              username: config.wakawarsUsername,
-              password: passwordForm.password
-            })
-          }
-        );
+        const loginPayload = await request<{
+          sessionId: string;
+          wakawarsUsername: string;
+        }>("/session/login", {
+          method: "POST",
+          body: JSON.stringify({
+            username: config.wakawarsUsername,
+            password: passwordForm.password,
+          }),
+        });
         setSessionId(loginPayload.sessionId);
         localStorage.setItem("wakawarsSession", loginPayload.sessionId);
         setSession({
           authenticated: true,
           passwordSet: true,
-          wakawarsUsername: loginPayload.wakawarsUsername
+          wakawarsUsername: loginPayload.wakawarsUsername,
         });
       }
 
@@ -278,8 +311,8 @@ const App = () => {
       const payload = await request<PublicConfig>("/friends", {
         method: "POST",
         body: JSON.stringify({
-          username: friendInput.trim()
-        })
+          username: friendInput.trim(),
+        }),
       });
       setConfig(payload);
       setFriendInput("");
@@ -306,12 +339,38 @@ const App = () => {
     }
   };
 
+  const handleCheckUpdates = async () => {
+    if (!window.molty?.checkForUpdates) {
+      setUpdateStatus("Updates are available in the macOS app.");
+      return;
+    }
+
+    setCheckingUpdates(true);
+    try {
+      const result = await window.molty.checkForUpdates();
+      if (result.status === "disabled") {
+        setUpdateStatus("Updates are checked in production builds.");
+      } else if (result.status === "error") {
+        setUpdateStatus("Unable to check updates right now.");
+      } else {
+        setUpdateStatus("Checking for updates...");
+      }
+    } catch {
+      setUpdateStatus("Unable to check updates right now.");
+    } finally {
+      setCheckingUpdates(false);
+    }
+  };
+
   const handleRemoveFriend = async (username: string) => {
     setLoading(true);
     try {
-      const payload = await request<PublicConfig>(`/friends/${encodeURIComponent(username)}`, {
-        method: "DELETE"
-      });
+      const payload = await request<PublicConfig>(
+        `/friends/${encodeURIComponent(username)}`,
+        {
+          method: "DELETE",
+        }
+      );
       setConfig(payload);
       setError(null);
       await loadStats(true);
@@ -364,7 +423,7 @@ const App = () => {
   const AddFriendCard = ({
     docked,
     dismissible,
-    onDismiss
+    onDismiss,
   }: {
     docked?: boolean;
     dismissible?: boolean;
@@ -409,9 +468,13 @@ const App = () => {
           {canShowSettings && (
             <button
               type="button"
-              className={`icon-button ${activeTab === "settings" ? "active" : ""}`}
+              className={`icon-button ${
+                activeTab === "settings" ? "active" : ""
+              }`}
               onClick={() =>
-                setActiveTab((prev) => (prev === "settings" ? "league" : "settings"))
+                setActiveTab((prev) =>
+                  prev === "settings" ? "league" : "settings"
+                )
               }
               aria-label="Settings"
             >
@@ -433,14 +496,21 @@ const App = () => {
       {showLogin ? (
         <section className="card">
           <h2>Welcome back</h2>
-          <p className="muted">Enter your WakaWars credentials to unlock this device.</p>
+          <p className="muted">
+            Enter your WakaWars credentials to unlock this device.
+          </p>
           <form className="stack" onSubmit={handleLogin}>
             <label>
               WakaWars username
               <input
                 type="text"
                 value={login.username}
-                onChange={(event) => setLogin((prev) => ({ ...prev, username: event.target.value }))}
+                onChange={(event) =>
+                  setLogin((prev) => ({
+                    ...prev,
+                    username: event.target.value,
+                  }))
+                }
                 placeholder="wakawars-username"
                 required
                 disabled={loading}
@@ -451,7 +521,12 @@ const App = () => {
               <input
                 type="password"
                 value={login.password}
-                onChange={(event) => setLogin((prev) => ({ ...prev, password: event.target.value }))}
+                onChange={(event) =>
+                  setLogin((prev) => ({
+                    ...prev,
+                    password: event.target.value,
+                  }))
+                }
                 placeholder="password"
                 required
                 disabled={loading}
@@ -475,7 +550,10 @@ const App = () => {
                 type="text"
                 value={onboarding.wakawarsUsername}
                 onChange={(event) =>
-                  setOnboarding((prev) => ({ ...prev, wakawarsUsername: event.target.value }))
+                  setOnboarding((prev) => ({
+                    ...prev,
+                    wakawarsUsername: event.target.value,
+                  }))
                 }
                 placeholder="wakawars-username"
                 required
@@ -488,7 +566,10 @@ const App = () => {
                 type="password"
                 value={onboarding.apiKey}
                 onChange={(event) =>
-                  setOnboarding((prev) => ({ ...prev, apiKey: event.target.value }))
+                  setOnboarding((prev) => ({
+                    ...prev,
+                    apiKey: event.target.value,
+                  }))
                 }
                 placeholder="api_key"
                 required
@@ -523,7 +604,9 @@ const App = () => {
               </div>
             ) : (
               <>
-                <p className="muted">Set a password to keep this Mac logged in.</p>
+                <p className="muted">
+                  Set a password to keep this Mac logged in.
+                </p>
                 <form className="stack" onSubmit={handleSetPassword}>
                   <label>
                     {passwordActionLabel}
@@ -531,7 +614,10 @@ const App = () => {
                       type="password"
                       value={passwordForm.password}
                       onChange={(event) =>
-                        setPasswordForm((prev) => ({ ...prev, password: event.target.value }))
+                        setPasswordForm((prev) => ({
+                          ...prev,
+                          password: event.target.value,
+                        }))
                       }
                       placeholder="password"
                       required
@@ -544,7 +630,10 @@ const App = () => {
                       type="password"
                       value={passwordForm.confirm}
                       onChange={(event) =>
-                        setPasswordForm((prev) => ({ ...prev, confirm: event.target.value }))
+                        setPasswordForm((prev) => ({
+                          ...prev,
+                          confirm: event.target.value,
+                        }))
                       }
                       placeholder="confirm password"
                       required
@@ -573,8 +662,35 @@ const App = () => {
                 <span className="toggle-ui" />
               </label>
             </div>
+            <div className="settings-row">
+              <span className="muted">Light theme</span>
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={theme === "light"}
+                  onChange={(event) =>
+                    setTheme(event.target.checked ? "light" : "dark")
+                  }
+                />
+                <span className="toggle-ui" />
+              </label>
+            </div>
+            <div className="settings-row">
+              <span className="muted">Updates</span>
+              <button
+                type="button"
+                className="ghost"
+                onClick={handleCheckUpdates}
+                disabled={checkingUpdates}
+              >
+                {checkingUpdates ? "Checking..." : "Check for updates"}
+              </button>
+            </div>
+            {updateStatus && <p className="muted">{updateStatus}</p>}
             {launchAtLogin === null && (
-              <p className="muted">Launch at login is available in the macOS app.</p>
+              <p className="muted">
+                Launch at login is available in the macOS app.
+              </p>
             )}
           </section>
 
@@ -585,7 +701,9 @@ const App = () => {
           <section className="card">
             <div className="section-header">
               <h2>Today</h2>
-              {lastUpdated && <span className="muted">Updated {lastUpdated}</span>}
+              {lastUpdated && (
+                <span className="muted">Updated {lastUpdated}</span>
+              )}
             </div>
             {stats ? (
               <div className="list">
@@ -633,7 +751,7 @@ const LeaderboardRow = ({
   entry,
   isSelf,
   onRemove,
-  disabled
+  disabled,
 }: {
   entry: LeaderboardEntry;
   isSelf: boolean;
@@ -641,7 +759,13 @@ const LeaderboardRow = ({
   disabled: boolean;
 }) => {
   const medal =
-    entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : entry.rank === 3 ? "🥉" : null;
+    entry.rank === 1
+      ? "🥇"
+      : entry.rank === 2
+      ? "🥈"
+      : entry.rank === 3
+      ? "🥉"
+      : null;
   const podiumClass =
     entry.rank && entry.rank <= 3 ? `podium podium-${entry.rank}` : "";
   const rankLabel = medal ?? (entry.rank ? `#${entry.rank}` : "—");

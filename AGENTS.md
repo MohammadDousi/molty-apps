@@ -15,7 +15,7 @@
 
 ## Server (Elysia)
 
-- Base URL: `http://localhost:3000` in dev, `https://wakawars.molty.app` in production.
+- Base URL: `http://localhost:3000` in dev, `https://wakawars.molty.cool` in production.
 - All WakaWars endpoints are grouped under `/wakawars/v0`.
 - Required env: `DATABASE_URL` (PostgreSQL).
 - Routes:
@@ -58,7 +58,7 @@
 
 - Packaging uses electron-builder (DMG + ZIP for macOS).
 - Auto-updates use `electron-updater` with a generic feed at:
-  - `https://wakawars.molty.app/updates`
+  - `https://wakawars.molty.cool/updates`
 - Notarization is enabled via `build/notarize.cjs` and macOS entitlements in `apps/wakawars/build`.
 
 ## Bun Usage

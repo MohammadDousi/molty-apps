@@ -6,6 +6,7 @@ declare global {
       getApiBase: () => Promise<string>;
       getLoginItemSettings?: () => Promise<{ openAtLogin: boolean }>;
       setLoginItemSettings?: (openAtLogin: boolean) => Promise<{ openAtLogin: boolean }>;
+      checkForUpdates?: () => Promise<{ status: string; error?: string }>;
     };
   }
 }
