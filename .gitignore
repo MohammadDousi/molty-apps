@@ -43,3 +43,4 @@ packages/server/prisma/dev.db
 packages/server/prisma/dev.db-journal
 packages/server/prisma/client
 *.ipa
+release/
