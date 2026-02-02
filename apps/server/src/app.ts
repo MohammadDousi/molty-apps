@@ -122,11 +122,10 @@ export const createServer = ({
             }
           }
 
-          const hasUser = (await store.countUsers()) > 0;
           return {
             authenticated: false,
             passwordSet: false,
-            hasUser,
+            hasUser: false,
           };
         })
         .post(
