@@ -8,15 +8,16 @@ datasource db {
 }
 
 model ww_user {
-  id                Int              @id @default(autoincrement())
-  wakawars_username String           @unique
-  api_key           String           @default("")
+  id                Int             @id @default(autoincrement())
+  wakawars_username String          @unique
+  api_key           String          @default("")
   password_hash     String?
-  friendships       ww_friendship[]  @relation("user_friendships")
-  friend_of         ww_friendship[]  @relation("friend_friendships")
+  friendships       ww_friendship[] @relation("user_friendships")
+  friend_of         ww_friendship[] @relation("friend_friendships")
   sessions          ww_session[]
-  created_at        DateTime         @default(now())
-  updated_at        DateTime         @updatedAt
+  daily_stats       ww_daily_stat[]
+  created_at        DateTime        @default(now())
+  updated_at        DateTime        @updatedAt
 }
 
 model ww_friendship {
@@ -44,12 +45,12 @@ model ww_session {
 model ww_daily_stat {
   id            Int      @id @default(autoincrement())
   user_id       Int
+  user          ww_user  @relation(fields: [user_id], references: [id], onDelete: Cascade)
   date_key      String
   total_seconds Int      @default(0)
   status        String
   error         String?
   fetched_at    DateTime @default(now())
-  user          ww_user  @relation(fields: [user_id], references: [id], onDelete: Cascade)
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
 
