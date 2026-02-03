@@ -42,6 +42,15 @@ const toPublicConfig = (config: UserConfig): PublicConfig => ({
   friends: config.friends.map((friend) => ({
     username: friend.username,
   })),
+  groups: config.groups.map((group) => ({
+    id: group.id,
+    name: group.name,
+    members: group.members.map((member) => ({
+      id: member.id,
+      username: member.username,
+    })),
+  })),
+  statsVisibility: config.statsVisibility,
   hasApiKey: Boolean(config.apiKey),
   passwordSet: Boolean(config.passwordHash),
 });
@@ -290,6 +299,31 @@ export const createServer = ({
             }),
           }
         )
+        .post(
+          "/visibility",
+          async ({ body, headers, set }) => {
+            const authCheck = await requireSession(headers, set);
+            if (!authCheck.ok) {
+              return { error: "Unauthorized" };
+            }
+
+            const updated = await store.setStatsVisibility(
+              authCheck.user.id,
+              body.visibility
+            );
+
+            return toPublicConfig(updated);
+          },
+          {
+            body: t.Object({
+              visibility: t.Union([
+                t.Literal("everyone"),
+                t.Literal("friends"),
+                t.Literal("no_one"),
+              ]),
+            }),
+          }
+        )
         .get(
           "/users/search",
           async ({ query, headers, set }) => {
@@ -380,6 +414,158 @@ export const createServer = ({
             }),
           }
         )
+        .post(
+          "/groups",
+          async ({ body, headers, set }) => {
+            const authCheck = await requireSession(headers, set);
+            if (!authCheck.ok) {
+              return { error: "Unauthorized" };
+            }
+
+            const name = body.name.trim();
+            if (!name) {
+              set.status = 400;
+              return { error: "Group name is required" };
+            }
+
+            const nameKey = name.toLowerCase();
+            const hasGroup = authCheck.user.groups.some(
+              (group) => group.name.toLowerCase() === nameKey
+            );
+            if (hasGroup) {
+              set.status = 409;
+              return { error: "Group name already exists" };
+            }
+
+            const updated = await store.createGroup(authCheck.user.id, name);
+            return toPublicConfig(updated);
+          },
+          {
+            body: t.Object({
+              name: t.String(),
+            }),
+          }
+        )
+        .delete(
+          "/groups/:groupId",
+          async ({ params, headers, set }) => {
+            const authCheck = await requireSession(headers, set);
+            if (!authCheck.ok) {
+              return { error: "Unauthorized" };
+            }
+
+            const groupId = Number(params.groupId);
+            if (!Number.isFinite(groupId)) {
+              set.status = 400;
+              return { error: "Invalid group id" };
+            }
+
+            const updated = await store.deleteGroup(authCheck.user.id, groupId);
+            return toPublicConfig(updated);
+          },
+          {
+            params: t.Object({
+              groupId: t.String(),
+            }),
+          }
+        )
+        .post(
+          "/groups/:groupId/members",
+          async ({ params, body, headers, set }) => {
+            const authCheck = await requireSession(headers, set);
+            if (!authCheck.ok) {
+              return { error: "Unauthorized" };
+            }
+
+            const groupId = Number(params.groupId);
+            if (!Number.isFinite(groupId)) {
+              set.status = 400;
+              return { error: "Invalid group id" };
+            }
+
+            const group = authCheck.user.groups.find(
+              (entry) => entry.id === groupId
+            );
+            if (!group) {
+              set.status = 404;
+              return { error: "Group not found" };
+            }
+
+            const memberUsername = normalizeFriendUsername(body.username);
+            if (!memberUsername) {
+              set.status = 400;
+              return { error: "Member username is required" };
+            }
+
+            const member = await store.getUserByUsername(memberUsername);
+            if (!member) {
+              set.status = 404;
+              return { error: "User not found" };
+            }
+
+            const updated = await store.addGroupMember(
+              authCheck.user.id,
+              groupId,
+              member.id
+            );
+            return toPublicConfig(updated);
+          },
+          {
+            params: t.Object({
+              groupId: t.String(),
+            }),
+            body: t.Object({
+              username: t.String(),
+            }),
+          }
+        )
+        .delete(
+          "/groups/:groupId/members/:username",
+          async ({ params, headers, set }) => {
+            const authCheck = await requireSession(headers, set);
+            if (!authCheck.ok) {
+              return { error: "Unauthorized" };
+            }
+
+            const groupId = Number(params.groupId);
+            if (!Number.isFinite(groupId)) {
+              set.status = 400;
+              return { error: "Invalid group id" };
+            }
+
+            const group = authCheck.user.groups.find(
+              (entry) => entry.id === groupId
+            );
+            if (!group) {
+              set.status = 404;
+              return { error: "Group not found" };
+            }
+
+            const memberUsername = normalizeFriendUsername(params.username);
+            if (!memberUsername) {
+              set.status = 400;
+              return { error: "Member username is required" };
+            }
+
+            const member = await store.getUserByUsername(memberUsername);
+            if (!member) {
+              return toPublicConfig(authCheck.user);
+            }
+
+            const updated = await store.removeGroupMember(
+              authCheck.user.id,
+              groupId,
+              member.id
+            );
+            return toPublicConfig(updated);
+          },
+          {
+            params: t.Object({
+              groupId: t.String(),
+              username: t.String(),
+            }),
+          }
+        )
         .get("/stats/today", async ({ set, headers }) => {
           const authCheck = await requireSession(headers, set);
           if (!authCheck.ok) {
@@ -397,31 +583,57 @@ export const createServer = ({
             return { error: "App is not configured" };
           }
 
-          const users = [
-            {
-              id: config.id,
-              username: config.wakawarsUsername,
-            },
-            ...config.friends.map((friend) => ({
-              id: friend.id,
-              username: friend.username,
-            })),
-          ];
+          const groupMemberIds = new Set(
+            config.groups.flatMap((group) => group.members.map((member) => member.id))
+          );
+          const friendIds = new Set(config.friends.map((friend) => friend.id));
+          const userIds = Array.from(
+            new Set([config.id, ...friendIds, ...groupMemberIds])
+          );
+          const userRecords = await store.getUsersByIds(userIds);
+          const usersById = new Map(userRecords.map((user) => [user.id, user]));
+          const users = userIds
+            .map((id) => usersById.get(id))
+            .filter((user): user is NonNullable<typeof user> => Boolean(user));
 
           const dateKey = new Date().toISOString().slice(0, 10);
           const dailyStats = await store.getDailyStats({
-            userIds: users.map((user) => user.id),
+            userIds,
             dateKey,
           });
           const statsByUserId = new Map(
             dailyStats.map((stat) => [stat.userId, stat])
           );
+          const incomingFriendIds = new Set(
+            await store.getIncomingFriendIds(config.id, userIds)
+          );
+          const incomingGroupOwnerIds = new Set(
+            await store.getGroupOwnerIdsForMember(config.id, userIds)
+          );
 
           const stats: DailyStat[] = users.map((user) => {
+            const isSelf = user.id === config.id;
             const stat = statsByUserId.get(user.id);
+            const isMutualFriend =
+              friendIds.has(user.id) && incomingFriendIds.has(user.id);
+            const isGroupConnected =
+              groupMemberIds.has(user.id) || incomingGroupOwnerIds.has(user.id);
+            const canView =
+              isSelf ||
+              user.statsVisibility === "everyone" ||
+              (user.statsVisibility === "friends" &&
+                (isMutualFriend || isGroupConnected));
+            if (!canView) {
+              return {
+                username: user.wakawarsUsername,
+                totalSeconds: 0,
+                status: "private",
+                error: null,
+              };
+            }
             if (!stat) {
               return {
-                username: user.username,
+                username: user.wakawarsUsername,
                 totalSeconds: 0,
                 status: "error",
                 error: "No stats synced yet",
@@ -429,7 +641,7 @@ export const createServer = ({
             }
 
             return {
-              username: user.username,
+              username: user.wakawarsUsername,
               totalSeconds: stat.totalSeconds,
               status: stat.status,
               error: stat.error ?? null,
@@ -466,30 +678,57 @@ export const createServer = ({
             return { error: "App is not configured" };
           }
 
-          const users = [
-            {
-              id: config.id,
-              username: config.wakawarsUsername,
-            },
-            ...config.friends.map((friend) => ({
-              id: friend.id,
-              username: friend.username,
-            })),
-          ];
+          const groupMemberIds = new Set(
+            config.groups.flatMap((group) => group.members.map((member) => member.id))
+          );
+          const friendIds = new Set(config.friends.map((friend) => friend.id));
+          const userIds = Array.from(
+            new Set([config.id, ...friendIds, ...groupMemberIds])
+          );
+          const userRecords = await store.getUsersByIds(userIds);
+          const usersById = new Map(userRecords.map((user) => [user.id, user]));
+          const users = userIds
+            .map((id) => usersById.get(id))
+            .filter((user): user is NonNullable<typeof user> => Boolean(user));
 
           const weeklyStats = await store.getWeeklyStats({
-            userIds: users.map((user) => user.id),
+            userIds,
             rangeKey,
           });
           const statsByUserId = new Map(
             weeklyStats.map((stat) => [stat.userId, stat])
           );
+          const incomingFriendIds = new Set(
+            await store.getIncomingFriendIds(config.id, userIds)
+          );
+          const incomingGroupOwnerIds = new Set(
+            await store.getGroupOwnerIdsForMember(config.id, userIds)
+          );
 
           const stats: WeeklyStat[] = users.map((user) => {
+            const isSelf = user.id === config.id;
             const stat = statsByUserId.get(user.id);
+            const isMutualFriend =
+              friendIds.has(user.id) && incomingFriendIds.has(user.id);
+            const isGroupConnected =
+              groupMemberIds.has(user.id) || incomingGroupOwnerIds.has(user.id);
+            const canView =
+              isSelf ||
+              user.statsVisibility === "everyone" ||
+              (user.statsVisibility === "friends" &&
+                (isMutualFriend || isGroupConnected));
+            if (!canView) {
+              return {
+                username: user.wakawarsUsername,
+                totalSeconds: 0,
+                dailyAverageSeconds: 0,
+                status: "private",
+                error: null,
+              };
+            }
             if (!stat) {
               return {
-                username: user.username,
+                username: user.wakawarsUsername,
                 totalSeconds: 0,
                 dailyAverageSeconds: 0,
                 status: "error",
@@ -498,7 +737,7 @@ export const createServer = ({
             }
 
             return {
-              username: user.username,
+              username: user.wakawarsUsername,
               totalSeconds: stat.totalSeconds,
               dailyAverageSeconds: stat.dailyAverageSeconds,
               status: stat.status,

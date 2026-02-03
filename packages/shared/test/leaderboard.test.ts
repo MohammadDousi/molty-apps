@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { computeLeaderboard, formatDelta, formatDuration } from "../src/index.js";
+import {
+  computeLeaderboard,
+  formatDelta,
+  formatDuration,
+  sliceLeaderboard,
+} from "../src/index.js";
 import type { DailyStat } from "../src/types.js";
 
 describe("formatDuration", () => {
@@ -50,5 +55,45 @@ describe("computeLeaderboard", () => {
     expect(leaderboard[0].rank).toBe(1);
     expect(leaderboard[1].rank).toBe(1);
     expect(leaderboard[2].rank).toBe(3);
+  });
+});
+
+describe("sliceLeaderboard", () => {
+  it("splits podium, near-me, and rest without duplicates", () => {
+    const stats: DailyStat[] = [
+      { username: "amy", totalSeconds: 4000, status: "ok" },
+      { username: "ben", totalSeconds: 3500, status: "ok" },
+      { username: "cora", totalSeconds: 3000, status: "ok" },
+      { username: "mo", totalSeconds: 2500, status: "ok" },
+      { username: "dena", totalSeconds: 2400, status: "ok" },
+      { username: "eli", totalSeconds: 0, status: "private" },
+    ];
+
+    const slices = sliceLeaderboard(stats, "mo", { podiumCount: 3, aroundCount: 1 });
+    expect(slices.podium.map((entry) => entry.username)).toEqual(["amy", "ben", "cora"]);
+    expect(slices.nearMe.map((entry) => entry.username)).toEqual(["cora", "mo", "dena"]);
+    expect(slices.rest.map((entry) => entry.username)).toEqual(["eli"]);
+  });
+
+  it("returns empty near-me when self is missing", () => {
+    const stats: DailyStat[] = [
+      { username: "amy", totalSeconds: 1200, status: "ok" },
+      { username: "ben", totalSeconds: 900, status: "ok" },
+    ];
+
+    const slices = sliceLeaderboard(stats, "zoe");
+    expect(slices.nearMe).toEqual([]);
+    expect(slices.podium.map((entry) => entry.username)).toEqual(["amy", "ben"]);
+  });
+
+  it("handles small lists with fewer than podium entries", () => {
+    const stats: DailyStat[] = [
+      { username: "amy", totalSeconds: 1200, status: "ok" },
+    ];
+
+    const slices = sliceLeaderboard(stats, "amy");
+    expect(slices.podium.map((entry) => entry.username)).toEqual(["amy"]);
+    expect(slices.nearMe.map((entry) => entry.username)).toEqual(["amy"]);
+    expect(slices.rest).toEqual([]);
   });
 });

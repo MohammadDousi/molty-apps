@@ -46,3 +46,49 @@ export const computeLeaderboard = <T extends DailyStat>(
     };
   });
 };
+
+type SliceOptions = {
+  podiumCount?: number;
+  aroundCount?: number;
+};
+
+export const sliceLeaderboard = <T extends DailyStat>(
+  entries: T[],
+  selfUsername: string,
+  { podiumCount = 3, aroundCount = 1 }: SliceOptions = {}
+): {
+  ordered: T[];
+  podium: T[];
+  nearMe: T[];
+  rest: T[];
+  selfEntry?: T;
+  leaderEntry?: T;
+} => {
+  const ordered = sortStats(entries);
+  const ranked = ordered.filter((entry) => entry.status === "ok");
+  const podium = ranked.slice(0, podiumCount);
+  const selfIndex = ranked.findIndex((entry) => entry.username === selfUsername);
+  const selfEntry = selfIndex >= 0 ? ranked[selfIndex] : undefined;
+  const leaderEntry = ranked[0];
+
+  let nearMe: T[] = [];
+  if (selfIndex >= 0) {
+    const start = Math.max(0, selfIndex - aroundCount);
+    const end = Math.min(ranked.length, selfIndex + aroundCount + 1);
+    nearMe = ranked.slice(start, end);
+  }
+
+  const picked = new Set<string>();
+  podium.forEach((entry) => picked.add(entry.username));
+  nearMe.forEach((entry) => picked.add(entry.username));
+  const rest = ordered.filter((entry) => !picked.has(entry.username));
+
+  return {
+    ordered,
+    podium,
+    nearMe,
+    rest,
+    selfEntry,
+    leaderEntry,
+  };
+};

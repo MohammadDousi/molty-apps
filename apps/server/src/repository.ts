@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
-import type { DailyStatStatus, UserConfig } from "@molty/shared";
+import type { DailyStatStatus, StatsVisibility, UserConfig } from "@molty/shared";
 
 export type DailyStatRecord = {
   userId: number;
@@ -35,6 +35,9 @@ export type ProviderLogRecord = {
 export type UserRepository = {
   countUsers: () => Promise<number>;
   listUsers: () => Promise<Array<{ id: number; wakawarsUsername: string; apiKey: string }>>;
+  getUsersByIds: (
+    userIds: number[]
+  ) => Promise<Array<{ id: number; wakawarsUsername: string; statsVisibility: StatsVisibility }>>;
   getUserById: (userId: number) => Promise<UserConfig | null>;
   getUserByUsername: (username: string) => Promise<UserConfig | null>;
   createUser: (config: { wakawarsUsername: string; apiKey: string }) => Promise<UserConfig>;
@@ -43,8 +46,18 @@ export type UserRepository = {
     config: { wakawarsUsername: string; apiKey: string }
   ) => Promise<UserConfig>;
   setPassword: (userId: number, passwordHash: string | null) => Promise<UserConfig>;
+  setStatsVisibility: (userId: number, visibility: StatsVisibility) => Promise<UserConfig>;
   addFriendship: (userId: number, friendId: number) => Promise<UserConfig>;
   removeFriendship: (userId: number, friendId: number) => Promise<UserConfig>;
+  createGroup: (userId: number, name: string) => Promise<UserConfig>;
+  deleteGroup: (userId: number, groupId: number) => Promise<UserConfig>;
+  addGroupMember: (userId: number, groupId: number, memberId: number) => Promise<UserConfig>;
+  removeGroupMember: (userId: number, groupId: number, memberId: number) => Promise<UserConfig>;
+  getIncomingFriendIds: (userId: number, candidateIds: number[]) => Promise<number[]>;
+  getGroupOwnerIdsForMember: (
+    memberId: number,
+    ownerIds: number[]
+  ) => Promise<number[]>;
   searchUsers: (
     query: string,
     options?: { excludeUserId?: number; limit?: number }
@@ -82,6 +95,7 @@ type PrismaUser = {
   wakawars_username: string;
   api_key: string;
   password_hash: string | null;
+  stats_visibility: StatsVisibility;
   friendships: Array<{
     friend_id: number;
     friend: {
@@ -90,17 +104,37 @@ type PrismaUser = {
       api_key: string;
     };
   }>;
+  groups_owned: Array<{
+    id: number;
+    name: string;
+    members: Array<{
+      user_id: number;
+      user: {
+        id: number;
+        wakawars_username: string;
+      };
+    }>;
+  }>;
 };
 
 const mapUserToConfig = (user: PrismaUser): UserConfig => ({
   id: user.id,
   wakawarsUsername: user.wakawars_username,
   apiKey: user.api_key,
+  statsVisibility: user.stats_visibility,
   passwordHash: user.password_hash,
   friends: user.friendships.map((friendship) => ({
     id: friendship.friend_id,
     username: friendship.friend.wakawars_username,
     apiKey: friendship.friend.api_key || null
+  })),
+  groups: user.groups_owned.map((group) => ({
+    id: group.id,
+    name: group.name,
+    members: group.members.map((member) => ({
+      id: member.user.id,
+      username: member.user.wakawars_username
+    }))
   }))
 });
 
@@ -108,6 +142,15 @@ const userInclude = {
   friendships: {
     include: {
       friend: true
+    }
+  },
+  groups_owned: {
+    include: {
+      members: {
+        include: {
+          user: true
+        }
+      }
     }
   }
 } as const;
@@ -124,6 +167,21 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
       id: user.id,
       wakawarsUsername: user.wakawars_username,
       apiKey: user.api_key
+    }));
+  };
+
+  const getUsersByIds = async (userIds: number[]) => {
+    if (userIds.length === 0) return [];
+
+    const users = await prisma.ww_user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, wakawars_username: true, stats_visibility: true }
+    });
+
+    return users.map((user) => ({
+      id: user.id,
+      wakawarsUsername: user.wakawars_username,
+      statsVisibility: user.stats_visibility as StatsVisibility
     }));
   };
 
@@ -200,6 +258,16 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     return mapUserToConfig(user as PrismaUser);
   };
 
+  const setStatsVisibility = async (userId: number, visibility: StatsVisibility) => {
+    const user = await prisma.ww_user.update({
+      where: { id: userId },
+      data: { stats_visibility: visibility },
+      include: userInclude
+    });
+
+    return mapUserToConfig(user as PrismaUser);
+  };
+
   const addFriendship = async (userId: number, friendId: number) => {
     if (userId !== friendId) {
       await prisma.ww_friendship.upsert({
@@ -239,6 +307,138 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     });
 
     return mapUserToConfig(updated as PrismaUser);
+  };
+
+  const createGroup = async (userId: number, name: string) => {
+    await prisma.ww_group.create({
+      data: {
+        owner_id: userId,
+        name
+      }
+    });
+
+    const updated = await prisma.ww_user.findUnique({
+      where: { id: userId },
+      include: userInclude
+    });
+
+    return mapUserToConfig(updated as PrismaUser);
+  };
+
+  const deleteGroup = async (userId: number, groupId: number) => {
+    await prisma.ww_group.deleteMany({
+      where: {
+        id: groupId,
+        owner_id: userId
+      }
+    });
+
+    const updated = await prisma.ww_user.findUnique({
+      where: { id: userId },
+      include: userInclude
+    });
+
+    return mapUserToConfig(updated as PrismaUser);
+  };
+
+  const addGroupMember = async (userId: number, groupId: number, memberId: number) => {
+    if (userId === memberId) {
+      const updated = await prisma.ww_user.findUnique({
+        where: { id: userId },
+        include: userInclude
+      });
+
+      return mapUserToConfig(updated as PrismaUser);
+    }
+
+    const group = await prisma.ww_group.findFirst({
+      where: {
+        id: groupId,
+        owner_id: userId
+      }
+    });
+
+    if (group) {
+      await prisma.ww_group_member.upsert({
+        where: {
+          group_id_user_id: {
+            group_id: groupId,
+            user_id: memberId
+          }
+        },
+        create: {
+          group_id: groupId,
+          user_id: memberId
+        },
+        update: {}
+      });
+    }
+
+    const updated = await prisma.ww_user.findUnique({
+      where: { id: userId },
+      include: userInclude
+    });
+
+    return mapUserToConfig(updated as PrismaUser);
+  };
+
+  const removeGroupMember = async (userId: number, groupId: number, memberId: number) => {
+    const group = await prisma.ww_group.findFirst({
+      where: {
+        id: groupId,
+        owner_id: userId
+      }
+    });
+
+    if (group) {
+      await prisma.ww_group_member.deleteMany({
+        where: {
+          group_id: groupId,
+          user_id: memberId
+        }
+      });
+    }
+
+    const updated = await prisma.ww_user.findUnique({
+      where: { id: userId },
+      include: userInclude
+    });
+
+    return mapUserToConfig(updated as PrismaUser);
+  };
+
+  const getIncomingFriendIds = async (userId: number, candidateIds: number[]) => {
+    if (candidateIds.length === 0) return [];
+
+    const rows = await prisma.ww_friendship.findMany({
+      where: {
+        user_id: { in: candidateIds },
+        friend_id: userId
+      },
+      select: { user_id: true }
+    });
+
+    return rows.map((row) => row.user_id);
+  };
+
+  const getGroupOwnerIdsForMember = async (memberId: number, ownerIds: number[]) => {
+    if (ownerIds.length === 0) return [];
+
+    const rows = await prisma.ww_group_member.findMany({
+      where: {
+        user_id: memberId,
+        group: {
+          owner_id: { in: ownerIds }
+        }
+      },
+      select: {
+        group: {
+          select: { owner_id: true }
+        }
+      }
+    });
+
+    return rows.map((row) => row.group.owner_id);
   };
 
   const searchUsers = async (
@@ -452,13 +652,21 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
   return {
     countUsers,
     listUsers,
+    getUsersByIds,
     getUserById,
     getUserByUsername,
     createUser,
     updateUser,
     setPassword,
+    setStatsVisibility,
     addFriendship,
     removeFriendship,
+    createGroup,
+    deleteGroup,
+    addGroupMember,
+    removeGroupMember,
+    getIncomingFriendIds,
+    getGroupOwnerIdsForMember,
     searchUsers,
     upsertDailyStat,
     getDailyStats,

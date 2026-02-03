@@ -3,7 +3,7 @@ import type { DailyStatStatus, UserConfig } from "@molty/shared";
 import { createServer } from "../src/app.js";
 import type { UserRepository } from "../src/repository.js";
 
-type UserRecord = Omit<UserConfig, "friends">;
+type UserRecord = Omit<UserConfig, "friends" | "groups">;
 type DailyStatRecord = {
   userId: number;
   dateKey: string;
@@ -25,11 +25,14 @@ type WeeklyStatRecord = {
 const createMemoryRepository = (): UserRepository => {
   let users: UserRecord[] = [];
   let friendships: Array<{ userId: number; friendId: number }> = [];
+  let groups: Array<{ id: number; ownerId: number; name: string }> = [];
+  let groupMembers: Array<{ groupId: number; userId: number }> = [];
   let dailyStats: DailyStatRecord[] = [];
   let weeklyStats: WeeklyStatRecord[] = [];
   let nextId = 1;
+  let nextGroupId = 1;
 
-  const withFriends = (user: UserRecord): UserConfig => {
+  const withRelations = (user: UserRecord): UserConfig => {
     const friends = friendships
       .filter((entry) => entry.userId === user.id)
       .map((entry) => users.find((friend) => friend.id === entry.friendId))
@@ -42,7 +45,21 @@ const createMemoryRepository = (): UserRepository => {
 
     return {
       ...user,
-      friends
+      friends,
+      groups: groups
+        .filter((group) => group.ownerId === user.id)
+        .map((group) => ({
+          id: group.id,
+          name: group.name,
+          members: groupMembers
+            .filter((member) => member.groupId === group.id)
+            .map((member) => users.find((entry) => entry.id === member.userId))
+            .filter(Boolean)
+            .map((member) => ({
+              id: member!.id,
+              username: member!.wakawarsUsername
+            }))
+        }))
     };
   };
 
@@ -56,35 +73,51 @@ const createMemoryRepository = (): UserRepository => {
         wakawarsUsername: user.wakawarsUsername,
         apiKey: user.apiKey
       })),
+    getUsersByIds: async (userIds) =>
+      users
+        .filter((user) => userIds.includes(user.id))
+        .map((user) => ({
+          id: user.id,
+          wakawarsUsername: user.wakawarsUsername,
+          statsVisibility: user.statsVisibility
+        })),
     getUserById: async (userId) => {
       const user = findUser((entry) => entry.id === userId);
-      return user ? withFriends(user) : null;
+      return user ? withRelations(user) : null;
     },
     getUserByUsername: async (username) => {
       const user = findUser((entry) => entry.wakawarsUsername === username);
-      return user ? withFriends(user) : null;
+      return user ? withRelations(user) : null;
     },
     createUser: async ({ wakawarsUsername, apiKey }) => {
       const user: UserRecord = {
         id: nextId++,
         wakawarsUsername,
         apiKey,
-        passwordHash: null
+        passwordHash: null,
+        statsVisibility: "everyone"
       };
       users = [...users, user];
-      return withFriends(user);
+      return withRelations(user);
     },
     updateUser: async (userId, { wakawarsUsername, apiKey }) => {
       users = users.map((user) =>
         user.id === userId ? { ...user, wakawarsUsername, apiKey } : user
       );
       const updated = findUser((entry) => entry.id === userId);
-      return withFriends(updated!);
+      return withRelations(updated!);
     },
     setPassword: async (userId, passwordHash) => {
       users = users.map((user) => (user.id === userId ? { ...user, passwordHash } : user));
       const updated = findUser((entry) => entry.id === userId);
-      return withFriends(updated!);
+      return withRelations(updated!);
+    },
+    setStatsVisibility: async (userId, statsVisibility) => {
+      users = users.map((user) =>
+        user.id === userId ? { ...user, statsVisibility } : user
+      );
+      const updated = findUser((entry) => entry.id === userId);
+      return withRelations(updated!);
     },
     addFriendship: async (userId, friendId) => {
       const exists = friendships.some(
@@ -94,15 +127,66 @@ const createMemoryRepository = (): UserRepository => {
         friendships = [...friendships, { userId, friendId }];
       }
       const updated = findUser((entry) => entry.id === userId);
-      return withFriends(updated!);
+      return withRelations(updated!);
     },
     removeFriendship: async (userId, friendId) => {
       friendships = friendships.filter(
         (entry) => !(entry.userId === userId && entry.friendId === friendId)
       );
       const updated = findUser((entry) => entry.id === userId);
-      return withFriends(updated!);
+      return withRelations(updated!);
     },
+    createGroup: async (userId, name) => {
+      groups = [...groups, { id: nextGroupId++, ownerId: userId, name }];
+      const updated = findUser((entry) => entry.id === userId);
+      return withRelations(updated!);
+    },
+    deleteGroup: async (userId, groupId) => {
+      groups = groups.filter(
+        (group) => !(group.id === groupId && group.ownerId === userId)
+      );
+      groupMembers = groupMembers.filter((member) => member.groupId !== groupId);
+      const updated = findUser((entry) => entry.id === userId);
+      return withRelations(updated!);
+    },
+    addGroupMember: async (userId, groupId, memberId) => {
+      const group = groups.find(
+        (entry) => entry.id === groupId && entry.ownerId === userId
+      );
+      const exists = groupMembers.some(
+        (entry) => entry.groupId === groupId && entry.userId === memberId
+      );
+      if (group && !exists && userId !== memberId) {
+        groupMembers = [...groupMembers, { groupId, userId: memberId }];
+      }
+      const updated = findUser((entry) => entry.id === userId);
+      return withRelations(updated!);
+    },
+    removeGroupMember: async (userId, groupId, memberId) => {
+      const group = groups.find(
+        (entry) => entry.id === groupId && entry.ownerId === userId
+      );
+      if (group) {
+        groupMembers = groupMembers.filter(
+          (entry) => !(entry.groupId === groupId && entry.userId === memberId)
+        );
+      }
+      const updated = findUser((entry) => entry.id === userId);
+      return withRelations(updated!);
+    },
+    getIncomingFriendIds: async (userId, candidateIds) =>
+      friendships
+        .filter((entry) => entry.friendId === userId && candidateIds.includes(entry.userId))
+        .map((entry) => entry.userId),
+    getGroupOwnerIdsForMember: async (memberId, ownerIds) =>
+      groups
+        .filter((group) => ownerIds.includes(group.ownerId))
+        .filter((group) =>
+          groupMembers.some(
+            (member) => member.groupId === group.id && member.userId === memberId
+          )
+        )
+        .map((group) => group.ownerId),
     searchUsers: async (query, options) => {
       const normalized = query.toLowerCase();
       const filtered = users.filter(
@@ -457,6 +541,115 @@ describe("server app", () => {
     );
 
     expect(response.status).toBe(404);
+  });
+
+  it("respects friends-only visibility", async () => {
+    const repository = createMemoryRepository();
+    const { app, store } = createServer({
+      port: 0,
+      repository,
+      enableStatusSync: false
+    });
+
+    const { sessionId: moSession } = await getSessionId(
+      await app.handle(
+        new Request("http://localhost/wakawars/v0/config", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            wakawarsUsername: "mo",
+            apiKey: "key"
+          })
+        })
+      )
+    );
+
+    const { sessionId: amySession } = await getSessionId(
+      await app.handle(
+        new Request("http://localhost/wakawars/v0/config", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            wakawarsUsername: "amy",
+            apiKey: "key"
+          })
+        })
+      )
+    );
+
+    await app.handle(
+      new Request("http://localhost/wakawars/v0/visibility", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-wakawars-session": amySession ?? ""
+        },
+        body: JSON.stringify({ visibility: "friends" })
+      })
+    );
+
+    await app.handle(
+      new Request("http://localhost/wakawars/v0/friends", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-wakawars-session": moSession ?? ""
+        },
+        body: JSON.stringify({ username: "amy" })
+      })
+    );
+
+    const dateKey = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    await store.upsertDailyStat({
+      userId: 1,
+      dateKey,
+      totalSeconds: 3600,
+      status: "ok",
+      fetchedAt: now
+    });
+    await store.upsertDailyStat({
+      userId: 2,
+      dateKey,
+      totalSeconds: 1800,
+      status: "ok",
+      fetchedAt: now
+    });
+
+    const response = await app.handle(
+      new Request("http://localhost/wakawars/v0/stats/today", {
+        headers: { "x-wakawars-session": moSession ?? "" }
+      })
+    );
+    const payload = (await response.json()) as {
+      entries: Array<{ username: string; status: string }>;
+    };
+    const amyEntry = payload.entries.find((entry) => entry.username === "amy");
+    expect(amyEntry?.status).toBe("private");
+
+    await app.handle(
+      new Request("http://localhost/wakawars/v0/friends", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-wakawars-session": amySession ?? ""
+        },
+        body: JSON.stringify({ username: "mo" })
+      })
+    );
+
+    const responseAfterMutual = await app.handle(
+      new Request("http://localhost/wakawars/v0/stats/today", {
+        headers: { "x-wakawars-session": moSession ?? "" }
+      })
+    );
+    const payloadAfterMutual = (await responseAfterMutual.json()) as {
+      entries: Array<{ username: string; status: string }>;
+    };
+    const amyEntryAfterMutual = payloadAfterMutual.entries.find(
+      (entry) => entry.username === "amy"
+    );
+    expect(amyEntryAfterMutual?.status).toBe("ok");
   });
 
   it("marks private users when unauthorized", async () => {

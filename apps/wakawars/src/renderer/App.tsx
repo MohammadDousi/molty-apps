@@ -4,16 +4,22 @@ import {
   useMemo,
   useState,
   useRef,
+  type CSSProperties,
   type FormEvent,
 } from "react";
-import type {
-  LeaderboardResponse,
-  PublicConfig,
-  LeaderboardEntry,
-  WeeklyLeaderboardResponse,
-  WeeklyLeaderboardEntry,
+import {
+  formatDelta,
+  formatDuration,
+  sliceLeaderboard,
+  type LeaderboardEntry,
+  type LeaderboardResponse,
+  type PublicConfig,
+  type WeeklyLeaderboardEntry,
+  type WeeklyLeaderboardResponse,
 } from "@molty/shared";
-import { formatDuration } from "@molty/shared";
+
+const logoUrl = new URL("./assets/logo.svg", import.meta.url).toString();
+const logoMaskStyle = { "--logo-mask": `url(${logoUrl})` } as CSSProperties;
 
 const initialOnboardingState = { wakawarsUsername: "", apiKey: "" };
 const initialLoginState = { username: "", password: "" };
@@ -47,9 +53,13 @@ const AddFriendCard = ({
   loading,
   errorMessage,
 }: AddFriendCardProps) => (
-  <section className={`card ${docked ? "add-friend-dock" : ""}`}>
-    <div className="section-header">
-      <h2>Add a friend</h2>
+  <section className={`panel add-friend-card ${docked ? "add-friend-dock" : ""}`}>
+    <div className="panel-head">
+      <div>
+        <p className="eyebrow">Add rival</p>
+        <h2>Invite a teammate or challenger</h2>
+        <p className="muted">Use their WakaTime username.</p>
+      </div>
       {dismissible && (
         <button
           type="button"
@@ -61,12 +71,12 @@ const AddFriendCard = ({
         </button>
       )}
     </div>
-    <form className="row add-friend-row" onSubmit={onSubmit}>
+    <form className="input-row" onSubmit={onSubmit}>
       <input
         type="text"
         value={friendInput}
         onChange={(event) => onFriendInputChange(event.target.value)}
-        placeholder="username"
+        placeholder="wakawars-username"
         disabled={loading}
       />
       <button className="primary" type="submit" disabled={loading}>
@@ -94,6 +104,10 @@ const App = () => {
   const [passwordForm, setPasswordForm] = useState(initialPasswordState);
   const [friendInput, setFriendInput] = useState("");
   const [addFriendError, setAddFriendError] = useState<string | null>(null);
+  const [groupNameInput, setGroupNameInput] = useState("");
+  const [groupMemberInputs, setGroupMemberInputs] = useState<
+    Record<number, string>
+  >({});
   const [activeTab, setActiveTab] = useState<"league" | "settings">("league");
   const [activeLeagueTab, setActiveLeagueTab] = useState<
     "today" | "weekly"
@@ -478,6 +492,143 @@ const App = () => {
     }
   };
 
+  const handleRemoveFriend = async (username: string) => {
+    if (!username) return;
+    setLoading(true);
+    try {
+      const payload = await request<PublicConfig>(
+        `/friends/${encodeURIComponent(username)}`,
+        {
+          method: "DELETE",
+        }
+      );
+      setConfig(payload);
+      setError(null);
+      await loadStats({ silent: true, includeWeekly: shouldIncludeWeekly });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to remove friend");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateGroup = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = groupNameInput.trim();
+    if (!name) return;
+
+    setLoading(true);
+    try {
+      const payload = await request<PublicConfig>("/groups", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
+      setConfig(payload);
+      setGroupNameInput("");
+      setError(null);
+      await loadStats({ silent: true, includeWeekly: shouldIncludeWeekly });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create group");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteGroup = async (groupId: number) => {
+    if (!groupId) return;
+
+    setLoading(true);
+    try {
+      const payload = await request<PublicConfig>(
+        `/groups/${encodeURIComponent(String(groupId))}`,
+        { method: "DELETE" }
+      );
+      setConfig(payload);
+      setError(null);
+      await loadStats({ silent: true, includeWeekly: shouldIncludeWeekly });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete group");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddGroupMember = async (
+    event: FormEvent<HTMLFormElement>,
+    groupId: number
+  ) => {
+    event.preventDefault();
+    const value = groupMemberInputs[groupId]?.trim();
+    if (!value) return;
+
+    setLoading(true);
+    try {
+      const payload = await request<PublicConfig>(
+        `/groups/${encodeURIComponent(String(groupId))}/members`,
+        {
+          method: "POST",
+          body: JSON.stringify({ username: value }),
+        }
+      );
+      setConfig(payload);
+      setGroupMemberInputs((prev) => ({ ...prev, [groupId]: "" }));
+      setError(null);
+      await loadStats({ silent: true, includeWeekly: shouldIncludeWeekly });
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to add group member"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRemoveGroupMember = async (
+    groupId: number,
+    username: string
+  ) => {
+    if (!groupId || !username) return;
+
+    setLoading(true);
+    try {
+      const payload = await request<PublicConfig>(
+        `/groups/${encodeURIComponent(String(groupId))}/members/${encodeURIComponent(
+          username
+        )}`,
+        { method: "DELETE" }
+      );
+      setConfig(payload);
+      setError(null);
+      await loadStats({ silent: true, includeWeekly: shouldIncludeWeekly });
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to remove group member"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVisibilityChange = async (value: PublicConfig["statsVisibility"]) => {
+    if (!config || config.statsVisibility === value) return;
+
+    setLoading(true);
+    try {
+      const payload = await request<PublicConfig>("/visibility", {
+        method: "POST",
+        body: JSON.stringify({ visibility: value }),
+      });
+      setConfig(payload);
+      setError(null);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to update visibility"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCheckUpdates = async () => {
     if (!window.molty?.checkForUpdates) {
       setUpdateStatus("Updates are available in the macOS app.");
@@ -527,6 +678,28 @@ const App = () => {
     return weeklyStats.range.replace(/_/g, " ");
   }, [weeklyStats?.range]);
 
+  const activeStats = activeLeagueTab === "weekly" ? weeklyStats : stats;
+  const activeEntries: RowEntry[] = activeStats?.entries ?? [];
+
+  const leaderboardSlices = useMemo(() => {
+    if (!config?.wakawarsUsername || activeEntries.length === 0) {
+      return null;
+    }
+    return sliceLeaderboard(activeEntries, config.wakawarsUsername, {
+      podiumCount: 3,
+      aroundCount: 1,
+    });
+  }, [activeEntries, config?.wakawarsUsername]);
+
+  const showNearMe = Boolean(
+    leaderboardSlices?.nearMe.some(
+      (entry) =>
+        !leaderboardSlices?.podium.some(
+          (podiumEntry) => podiumEntry.username === entry.username
+        )
+    )
+  );
+
   const showLogin = Boolean(session?.hasUser && !session?.authenticated);
   const showAuth = !isAuthenticated;
   const showWelcome = showAuth && authView === "welcome";
@@ -535,15 +708,36 @@ const App = () => {
   const canShowSettings = Boolean(isConfigured && isAuthenticated);
   const showSettings = Boolean(canShowSettings && activeTab === "settings");
   const passwordActionLabel = "Set password";
+  const headerSubtitle = useMemo(() => {
+    if (showSettings) return "Control room";
+    if (showAuth) {
+      if (authView === "signin") return "Sign in";
+      if (authView === "signup") return "Create account";
+      return "Welcome";
+    }
+    return activeLeagueTab === "weekly" ? "Weekly league" : "Daily league";
+  }, [showSettings, showAuth, authView, activeLeagueTab]);
+  const headerStatus =
+    !showAuth && !showSettings && lastUpdated
+      ? `Updated ${lastUpdated}`
+      : null;
 
   if (showMainLoading) {
     return (
       <div className="app">
         <header className="header">
-          <div>
-            <h1>WakaWars</h1>
+          <div className="app-brand">
+            <span className="app-brand-icon" role="img" aria-label="WakaWars logo">
+              <span className="app-brand-mark logo-mask" style={logoMaskStyle} />
+            </span>
+            <div className="brand-copy">
+              <span className="brand-title">WakaWars</span>
+              <span className="brand-sub">{headerSubtitle}</span>
+            </div>
           </div>
-          <div className="header-meta" />
+          <div className="header-meta">
+            {headerStatus && <span className="status-pill">{headerStatus}</span>}
+          </div>
         </header>
         {error && (
           <div className="error">
@@ -553,14 +747,15 @@ const App = () => {
             </button>
           </div>
         )}
-        <section className="card">
-          <div className="section-header">
-            <div className="section-title">
-              <h2>Today</h2>
-              <span className="muted">Restoring session</span>
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Session</p>
+              <h2>Restoring your league</h2>
+              <p className="muted">Syncing your latest stats.</p>
             </div>
           </div>
-          <p className="muted">Loading your league...</p>
+          <div className="loading-shimmer" aria-hidden="true" />
         </section>
       </div>
     );
@@ -570,14 +765,28 @@ const App = () => {
     return (
       <div className="app">
         <header className="header">
-          <div>
-            <h1>WakaWars</h1>
+          <div className="app-brand">
+            <span className="app-brand-icon" role="img" aria-label="WakaWars logo">
+              <span className="app-brand-mark logo-mask" style={logoMaskStyle} />
+            </span>
+            <div className="brand-copy">
+              <span className="brand-title">WakaWars</span>
+              <span className="brand-sub">{headerSubtitle}</span>
+            </div>
           </div>
-          <div className="header-meta" />
+          <div className="header-meta">
+            {headerStatus && <span className="status-pill">{headerStatus}</span>}
+          </div>
         </header>
-        <section className="card">
-          <h2>Loading</h2>
-          <p className="muted">Preparing your WakaWars session...</p>
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Loading</p>
+              <h2>Preparing WakaWars</h2>
+              <p className="muted">Warming up the arena.</p>
+            </div>
+          </div>
+          <div className="loading-shimmer" aria-hidden="true" />
         </section>
       </div>
     );
@@ -589,29 +798,42 @@ const App = () => {
 
   return (
     <div className={`app ${showDockedAdd ? "has-docked-add" : ""}`}>
-      <header className="header">
-        <div>
-          <h1>WakaWars</h1>
-        </div>
-        <div className="header-meta">
-          {canShowSettings && (
-            <button
-              type="button"
-              className={`icon-button ghost-button ${
-                activeTab === "settings" ? "active" : ""
-              }`}
-              onClick={() =>
-                setActiveTab((prev) =>
-                  prev === "settings" ? "league" : "settings"
-                )
-              }
-              aria-label="Settings"
+      {!showWelcome && (
+        <header className="header">
+          <div className="app-brand">
+            <span
+              className="app-brand-icon"
+              role="img"
+              aria-label="WakaWars logo"
             >
-              ⚙︎
-            </button>
-          )}
-        </div>
-      </header>
+              <span className="app-brand-mark logo-mask" style={logoMaskStyle} />
+            </span>
+            <div className="brand-copy">
+              <span className="brand-title">WakaWars</span>
+              <span className="brand-sub">{headerSubtitle}</span>
+            </div>
+          </div>
+          <div className="header-meta">
+            {headerStatus && <span className="status-pill">{headerStatus}</span>}
+            {canShowSettings && (
+              <button
+                type="button"
+                className={`icon-button ghost-button ${
+                  activeTab === "settings" ? "active" : ""
+                }`}
+                onClick={() =>
+                  setActiveTab((prev) =>
+                    prev === "settings" ? "league" : "settings"
+                  )
+                }
+                aria-label="Settings"
+              >
+                ⚙︎
+              </button>
+            )}
+          </div>
+        </header>
+      )}
 
       {error && (
         <div className="error">
@@ -623,22 +845,29 @@ const App = () => {
       )}
 
       {showWelcome ? (
-        <section className="card welcome-card">
-          <div className="app-logo" aria-hidden="true">
-            <div className="logo-orbit" />
-            <div className="logo-core">W</div>
+        <section className="panel hero-panel">
+          <div className="hero-center">
+            <div className="app-logo" aria-hidden="true">
+              <span
+                className="app-logo-mark logo-mask"
+                style={logoMaskStyle}
+                aria-hidden="true"
+              />
+              <div className="logo-orbit" />
+            </div>
+            <p className="eyebrow">WAKAWARS</p>
+            <h2>Build your focus arena</h2>
+            <p className="muted">
+              Compete with friends and keep your WakaTime momentum visible.
+            </p>
           </div>
-          <h2>Welcome to WakaWars</h2>
-          <p className="muted">
-            Start a rivalry with friends and track your WakaTime focus.
-          </p>
-          <div className="row welcome-actions">
+          <div className="hero-actions">
             <button
               className="primary"
               type="button"
               onClick={() => setAuthView("signup")}
             >
-              Sign up
+              Create account
             </button>
             <button
               className="ghost"
@@ -648,11 +877,29 @@ const App = () => {
               Sign in
             </button>
           </div>
+          <div className="feature-grid">
+            <div className="feature-card">
+              <h3>Daily duels</h3>
+              <p className="muted">See who leads today in minutes, not noise.</p>
+            </div>
+            <div className="feature-card">
+              <h3>Weekly crowns</h3>
+              <p className="muted">Track the long game with weekly averages.</p>
+            </div>
+            <div className="feature-card">
+              <h3>Private by design</h3>
+              <p className="muted">No logins, no cloud accounts, just your data.</p>
+            </div>
+          </div>
         </section>
       ) : showSignIn ? (
-        <section className="card">
-          <div className="section-header">
-            <h2>Sign in</h2>
+        <section className="panel form-panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Sign in</p>
+              <h2>Unlock this device</h2>
+              <p className="muted">Use your WakaWars username and password.</p>
+            </div>
             {!showLogin && (
               <button
                 className="ghost tiny"
@@ -663,9 +910,6 @@ const App = () => {
               </button>
             )}
           </div>
-          <p className="muted">
-            Enter your WakaWars credentials to unlock this device.
-          </p>
           <form className="stack" onSubmit={handleLogin}>
             <label>
               WakaWars username
@@ -694,7 +938,7 @@ const App = () => {
                     password: event.target.value,
                   }))
                 }
-                placeholder="password (optional)"
+                placeholder="password"
                 disabled={loading}
               />
             </label>
@@ -714,9 +958,15 @@ const App = () => {
           </div>
         </section>
       ) : showSignUp ? (
-        <section className="card">
-          <div className="section-header">
-            <h2>Create account</h2>
+        <section className="panel form-panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Create account</p>
+              <h2>Start your rivalry</h2>
+              <p className="muted">
+                Set a WakaWars username and connect your token.
+              </p>
+            </div>
             <button
               className="ghost tiny"
               type="button"
@@ -725,9 +975,6 @@ const App = () => {
               Back
             </button>
           </div>
-          <p className="muted">
-            Set your WakaWars username and connect your WakaTime token.
-          </p>
           <form className="stack" onSubmit={handleOnboardingSubmit}>
             <label>
               WakaWars username
@@ -766,7 +1013,7 @@ const App = () => {
             </button>
           </form>
           <div className="inline-action">
-            <span className="muted">Already have an account?</span>
+            <span className="muted">Already in the league?</span>
             <button
               className="ghost tiny"
               type="button"
@@ -778,20 +1025,34 @@ const App = () => {
         </section>
       ) : showSettings ? (
         <>
-          <section className="card">
-            <h2>Account</h2>
-            <div className="settings-row">
-              <span className="muted">WakaWars username</span>
-              <span>{config?.wakawarsUsername}</span>
+          <section className="panel settings-panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Account</p>
+                <h2>Identity & access</h2>
+                <p className="muted">Your WakaWars profile and token status.</p>
+              </div>
             </div>
-            <div className="settings-row">
-              <span className="muted">API key</span>
-              <span>{config?.hasApiKey ? "Connected" : "Missing"}</span>
+            <div className="settings-list">
+              <div className="settings-row">
+                <span className="muted">WakaWars username</span>
+                <span>{config?.wakawarsUsername}</span>
+              </div>
+              <div className="settings-row">
+                <span className="muted">API key</span>
+                <span>{config?.hasApiKey ? "Connected" : "Missing"}</span>
+              </div>
             </div>
           </section>
 
-          <section className="card">
-            <h2>Security</h2>
+          <section className="panel settings-panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Security</p>
+                <h2>Device lock</h2>
+                <p className="muted">Keep this Mac signed in.</p>
+              </div>
+            </div>
             {session?.passwordSet ? (
               <div className="settings-row">
                 <span className="muted">Password</span>
@@ -843,43 +1104,235 @@ const App = () => {
             )}
           </section>
 
-          <section className="card">
-            <h2>System</h2>
-            <div className="settings-row">
-              <span className="muted">Launch at login</span>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={Boolean(launchAtLogin)}
-                  onChange={(event) => handleLaunchToggle(event.target.checked)}
-                  disabled={launchAtLogin === null}
-                />
-                <span className="toggle-ui" />
-              </label>
+          <section className="panel settings-panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Privacy</p>
+                <h2>Stat visibility</h2>
+                <p className="muted">Choose who can see your stats.</p>
+              </div>
             </div>
-            <div className="settings-row">
-              <span className="muted">Light theme</span>
-              <label className="toggle">
-                <input
-                  type="checkbox"
-                  checked={theme === "light"}
-                  onChange={(event) =>
-                    setTheme(event.target.checked ? "light" : "dark")
-                  }
-                />
-                <span className="toggle-ui" />
-              </label>
+            <div className="visibility-grid">
+              {[
+                {
+                  value: "everyone",
+                  title: "Everyone",
+                  description: "Anyone in your leagues can see your stats.",
+                },
+                {
+                  value: "friends",
+                  title: "Friends only",
+                  description: "Only mutual friends or shared groups can view.",
+                },
+                {
+                  value: "no_one",
+                  title: "No one",
+                  description: "Hide stats from everyone else.",
+                },
+              ].map((option) => (
+                <label
+                  key={option.value}
+                  className={`visibility-option ${
+                    config?.statsVisibility === option.value ? "active" : ""
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="stats-visibility"
+                    value={option.value}
+                    checked={config?.statsVisibility === option.value}
+                    onChange={() =>
+                      handleVisibilityChange(
+                        option.value as PublicConfig["statsVisibility"]
+                      )
+                    }
+                    disabled={loading}
+                  />
+                  <div className="visibility-copy">
+                    <span className="visibility-title">{option.title}</span>
+                    <span className="muted">{option.description}</span>
+                  </div>
+                </label>
+              ))}
             </div>
-            <div className="settings-row">
-              <span className="muted">Updates</span>
-              <button
-                type="button"
-                className="ghost"
-                onClick={handleCheckUpdates}
-                disabled={checkingUpdates}
-              >
-                {checkingUpdates ? "Checking..." : "Check for updates"}
+          </section>
+
+          <section className="panel settings-panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Friends</p>
+                <h2>Rival roster</h2>
+                <p className="muted">
+                  {config?.friends.length ?? 0} rivals on deck.
+                </p>
+              </div>
+            </div>
+            {config?.friends.length ? (
+              <div className="settings-list">
+                {config.friends.map((friend) => (
+                  <div className="settings-row" key={friend.username}>
+                    <span>{friend.username}</span>
+                    <button
+                      className="ghost danger tiny"
+                      type="button"
+                      onClick={() => handleRemoveFriend(friend.username)}
+                      disabled={loading}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">No friends yet. Add rivals below.</p>
+            )}
+          </section>
+
+          <section className="panel settings-panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Groups</p>
+                <h2>Squad lineup</h2>
+                <p className="muted">
+                  {config?.groups.length ?? 0} squads saved.
+                </p>
+              </div>
+            </div>
+            <form className="row group-create" onSubmit={handleCreateGroup}>
+              <input
+                type="text"
+                placeholder="New group name"
+                value={groupNameInput}
+                onChange={(event) => setGroupNameInput(event.target.value)}
+                disabled={loading}
+              />
+              <button className="primary" type="submit" disabled={loading}>
+                Create
               </button>
+            </form>
+            {config?.groups.length ? (
+              <div className="group-list">
+                {config.groups.map((group) => (
+                  <div className="group-block" key={group.id}>
+                    <div className="group-header">
+                      <div className="group-title">
+                        <h3>{group.name}</h3>
+                        <span className="muted">
+                          {group.members.length} members
+                        </span>
+                      </div>
+                      <button
+                        className="ghost danger tiny"
+                        type="button"
+                        onClick={() => handleDeleteGroup(group.id)}
+                        disabled={loading}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    {group.members.length ? (
+                      <div className="settings-list">
+                        {group.members.map((member) => (
+                          <div className="settings-row" key={member.id}>
+                            <span>{member.username}</span>
+                            <button
+                              className="ghost danger tiny"
+                              type="button"
+                              onClick={() =>
+                                handleRemoveGroupMember(
+                                  group.id,
+                                  member.username
+                                )
+                              }
+                              disabled={loading}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="muted">No members yet.</p>
+                    )}
+                    <form
+                      className="row group-add"
+                      onSubmit={(event) =>
+                        handleAddGroupMember(event, group.id)
+                      }
+                    >
+                      <input
+                        type="text"
+                        placeholder="Add member by username"
+                        value={groupMemberInputs[group.id] ?? ""}
+                        onChange={(event) =>
+                          setGroupMemberInputs((prev) => ({
+                            ...prev,
+                            [group.id]: event.target.value,
+                          }))
+                        }
+                        disabled={loading}
+                      />
+                      <button className="ghost" type="submit" disabled={loading}>
+                        Add
+                      </button>
+                    </form>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">
+                Create squads to add multiple rivals at once.
+              </p>
+            )}
+          </section>
+
+          <section className="panel settings-panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">System</p>
+                <h2>Startup & appearance</h2>
+                <p className="muted">Control launch behavior and theme.</p>
+              </div>
+            </div>
+            <div className="settings-list">
+              <div className="settings-row">
+                <span className="muted">Launch at login</span>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(launchAtLogin)}
+                    onChange={(event) =>
+                      handleLaunchToggle(event.target.checked)
+                    }
+                    disabled={launchAtLogin === null}
+                  />
+                  <span className="toggle-ui" />
+                </label>
+              </div>
+              <div className="settings-row">
+                <span className="muted">Light theme</span>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={theme === "light"}
+                    onChange={(event) =>
+                      setTheme(event.target.checked ? "light" : "dark")
+                    }
+                  />
+                  <span className="toggle-ui" />
+                </label>
+              </div>
+              <div className="settings-row">
+                <span className="muted">Updates</span>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={handleCheckUpdates}
+                  disabled={checkingUpdates}
+                >
+                  {checkingUpdates ? "Checking..." : "Check for updates"}
+                </button>
+              </div>
             </div>
             {updateStatus && <p className="muted">{updateStatus}</p>}
             {launchAtLoginStatus === "requires-approval" && (
@@ -910,18 +1363,21 @@ const App = () => {
         </>
       ) : (
         <>
-          <section className="card">
-            <div className="section-header">
-              <div className="section-title">
-                <h2>{activeLeagueTab === "weekly" ? "Weekly" : "Today"}</h2>
-                {activeLeagueTab === "weekly" && (
-                  <span className="muted">{weeklyRangeLabel}</span>
-                )}
+          <section className="panel league-panel">
+            <div className="league-header">
+              <div className="league-title">
+                <p className="eyebrow">League</p>
+                <h2>{activeLeagueTab === "weekly" ? "Weekly arena" : "Today's arena"}</h2>
+                <div className="league-meta">
+                  {activeLeagueTab === "weekly" && (
+                    <span className="meta-pill">{weeklyRangeLabel}</span>
+                  )}
+                  {lastUpdated && (
+                    <span className="meta-pill">Updated {lastUpdated}</span>
+                  )}
+                </div>
               </div>
-              <div className="section-actions">
-                {lastUpdated && (
-                  <span className="muted">Updated {lastUpdated}</span>
-                )}
+              <div className="league-actions">
                 <div className="tab-group">
                   <button
                     type="button"
@@ -944,32 +1400,94 @@ const App = () => {
                 </div>
               </div>
             </div>
-            {activeLeagueTab === "weekly" ? (
-              weeklyStats ? (
-                <div className="list">
-                  {weeklyStats.entries.map((entry) => (
-                    <WeeklyLeaderboardRow
-                      key={entry.username}
-                      entry={entry}
-                      isSelf={entry.username === config?.wakawarsUsername}
-                    />
-                  ))}
+            {activeStats ? (
+              activeEntries.length === 0 ? (
+                <div className="empty-state">
+                  <h3>No friends yet</h3>
+                  <p className="muted">
+                    Add rivals to start your first league.
+                  </p>
                 </div>
               ) : (
-                <p className="muted">No weekly stats yet.</p>
+                <div className="league-content">
+                  <div className="league-grid">
+                    <SummaryCard
+                      selfEntry={leaderboardSlices?.selfEntry}
+                      leaderEntry={leaderboardSlices?.leaderEntry}
+                      isWeekly={activeLeagueTab === "weekly"}
+                    />
+                    <div className="league-side">
+                      <div className="subcard">
+                        <div className="subcard-header">
+                          <h3>Podium</h3>
+                          <span className="muted">Top 3</span>
+                        </div>
+                        {leaderboardSlices?.podium.length ? (
+                          <div className="mini-list">
+                            {leaderboardSlices.podium.map((entry) => (
+                              <MiniRow
+                                key={`podium-${entry.username}`}
+                                entry={entry}
+                                isSelf={entry.username === config?.wakawarsUsername}
+                              />
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="muted">No ranked entries yet.</p>
+                        )}
+                      </div>
+                      {showNearMe ? (
+                        <div className="subcard">
+                          <div className="subcard-header">
+                            <h3>Near you</h3>
+                            <span className="muted">±1 rank</span>
+                          </div>
+                          <div className="mini-list">
+                            {leaderboardSlices.nearMe.map((entry) => (
+                              <MiniRow
+                                key={`near-${entry.username}`}
+                                entry={entry}
+                                isSelf={entry.username === config?.wakawarsUsername}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="list-section">
+                    <div className="list-header">
+                      <h3>All players</h3>
+                      <span className="muted">
+                        {activeEntries.length} rivals
+                      </span>
+                    </div>
+                    <div className="list">
+                      {activeLeagueTab === "weekly"
+                        ? weeklyStats?.entries.map((entry) => (
+                            <WeeklyLeaderboardRow
+                              key={entry.username}
+                              entry={entry}
+                              isSelf={entry.username === config?.wakawarsUsername}
+                            />
+                          ))
+                        : stats?.entries.map((entry) => (
+                            <LeaderboardRow
+                              key={entry.username}
+                              entry={entry}
+                              isSelf={entry.username === config?.wakawarsUsername}
+                            />
+                          ))}
+                    </div>
+                  </div>
+                </div>
               )
-            ) : stats ? (
-              <div className="list">
-                {stats.entries.map((entry) => (
-                  <LeaderboardRow
-                    key={entry.username}
-                    entry={entry}
-                    isSelf={entry.username === config?.wakawarsUsername}
-                  />
-                ))}
-              </div>
             ) : (
-              <p className="muted">No stats yet.</p>
+              <p className="muted">
+                {activeLeagueTab === "weekly"
+                  ? "No weekly stats yet."
+                  : "No stats yet."}
+              </p>
             )}
           </section>
           {showDockedAdd && (
@@ -1003,7 +1521,7 @@ const statusLabel = (
     return formatDuration(totalSeconds);
   }
   if (status === "private") {
-    return null;
+    return "Private";
   }
   if (status === "not_found") {
     return "Not found";
@@ -1020,18 +1538,102 @@ const rankDisplay = (rank: number | null) => {
   };
 };
 
-const LeaderboardRow = ({
+type RowEntry = LeaderboardEntry | WeeklyLeaderboardEntry;
+
+const SummaryCard = ({
+  selfEntry,
+  leaderEntry,
+  isWeekly,
+}: {
+  selfEntry?: RowEntry;
+  leaderEntry?: RowEntry;
+  isWeekly: boolean;
+}) => {
+  const { rankLabel } = rankDisplay(selfEntry?.rank ?? null);
+  const timeLabel = selfEntry
+    ? statusLabel(selfEntry.status, selfEntry.totalSeconds)
+    : "—";
+  const timeClass =
+    selfEntry?.status === "ok" ? "summary-time" : "summary-time status";
+
+  const gapSeconds =
+    selfEntry?.status === "ok" && leaderEntry?.status === "ok"
+      ? selfEntry.totalSeconds - leaderEntry.totalSeconds
+      : null;
+  const gapLabel = gapSeconds === null ? "—" : formatDelta(gapSeconds);
+  const gapTone =
+    gapSeconds === null ? "neutral" : gapSeconds >= 0 ? "positive" : "negative";
+
+  const averageLabel =
+    isWeekly && selfEntry?.status === "ok" && "dailyAverageSeconds" in selfEntry
+      ? formatDuration(selfEntry.dailyAverageSeconds)
+      : null;
+
+  return (
+    <div className="summary-card">
+      <div className="summary-header">
+        <span className="eyebrow">Your standing</span>
+        {selfEntry?.status === "ok" && <span className="summary-rank">{rankLabel}</span>}
+      </div>
+      <div className="summary-main">
+        <div className={timeClass}>{timeLabel ?? "—"}</div>
+        {selfEntry && <div className="summary-name">{selfEntry.username}</div>}
+      </div>
+      <div className="summary-meta">
+        <div className="summary-item">
+          <span className="muted">Leader gap</span>
+          <span className={`summary-value ${gapTone}`}>{gapLabel}</span>
+        </div>
+        {averageLabel && (
+          <div className="summary-item">
+            <span className="muted">Avg/day</span>
+            <span className="summary-value">{averageLabel}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const MiniRow = ({
   entry,
   isSelf,
 }: {
-  entry: LeaderboardEntry;
+  entry: RowEntry;
   isSelf: boolean;
 }) => {
-  const { rankLabel, podiumClass } = rankDisplay(entry.rank);
+  const { rankLabel, podiumClass } = rankDisplay(entry.rank ?? null);
   const timeLabel = statusLabel(entry.status, entry.totalSeconds);
+  const timeClass =
+    entry.status === "ok" ? "mini-time" : "mini-time muted status";
 
   return (
-    <div className={`row-item ${isSelf ? "self" : ""} ${podiumClass}`}>
+    <div className={`mini-row ${isSelf ? "self" : ""} ${podiumClass}`}>
+      <span className="mini-rank">{rankLabel}</span>
+      <span className="mini-name">{entry.username}</span>
+      <span className={timeClass}>{timeLabel ?? "—"}</span>
+    </div>
+  );
+};
+
+const BaseLeaderboardRow = ({
+  entry,
+  isSelf,
+  secondary,
+}: {
+  entry: RowEntry;
+  isSelf: boolean;
+  secondary?: string | null;
+}) => {
+  const { rankLabel, podiumClass } = rankDisplay(entry.rank ?? null);
+  const timeLabel = statusLabel(entry.status, entry.totalSeconds);
+  const timeClass =
+    entry.status === "ok" ? "time" : "time muted status";
+
+  return (
+    <div
+      className={`row-item ${isSelf ? "self" : ""} ${podiumClass} status-${entry.status}`}
+    >
       <div className="row-item-left">
         <div className="avatar">{entry.username.slice(0, 1).toUpperCase()}</div>
         <div className="row-content">
@@ -1039,16 +1641,31 @@ const LeaderboardRow = ({
             <span>{entry.username}</span>
             {isSelf && <span className="badge">YOU</span>}
           </div>
+          {secondary && (
+            <div className="row-sub">
+              <span>{secondary}</span>
+            </div>
+          )}
         </div>
       </div>
       <div className="row-meta">
         <div className="row-meta-top">
           <span className="rank-display">{rankLabel}</span>
-          {timeLabel && <span className="time">{timeLabel}</span>}
+          {timeLabel && <span className={timeClass}>{timeLabel}</span>}
         </div>
       </div>
     </div>
   );
+};
+
+const LeaderboardRow = ({
+  entry,
+  isSelf,
+}: {
+  entry: LeaderboardEntry;
+  isSelf: boolean;
+}) => {
+  return <BaseLeaderboardRow entry={entry} isSelf={isSelf} />;
 };
 
 const WeeklyLeaderboardRow = ({
@@ -1058,34 +1675,15 @@ const WeeklyLeaderboardRow = ({
   entry: WeeklyLeaderboardEntry;
   isSelf: boolean;
 }) => {
-  const { rankLabel, podiumClass } = rankDisplay(entry.rank);
-  const timeLabel = statusLabel(entry.status, entry.totalSeconds);
   const averageLabel =
     entry.status === "ok" ? formatDuration(entry.dailyAverageSeconds) : null;
 
   return (
-    <div className={`row-item ${isSelf ? "self" : ""} ${podiumClass}`}>
-      <div className="row-item-left">
-        <div className="avatar">{entry.username.slice(0, 1).toUpperCase()}</div>
-        <div className="row-content">
-          <div className="row-title">
-            <span>{entry.username}</span>
-            {isSelf && <span className="badge">YOU</span>}
-          </div>
-          {averageLabel && (
-            <div className="row-sub">
-              <span>Avg {averageLabel}/day</span>
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="row-meta">
-        <div className="row-meta-top">
-          <span className="rank-display">{rankLabel}</span>
-          {timeLabel && <span className="time">{timeLabel}</span>}
-        </div>
-      </div>
-    </div>
+    <BaseLeaderboardRow
+      entry={entry}
+      isSelf={isSelf}
+      secondary={averageLabel ? `Avg ${averageLabel}/day` : null}
+    />
   );
 };
 

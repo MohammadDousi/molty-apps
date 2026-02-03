@@ -8,17 +8,34 @@ export type FriendPublic = {
   username: string;
 };
 
+export type StatsVisibility = "everyone" | "friends" | "no_one";
+
+export type GroupMember = {
+  id: number;
+  username: string;
+};
+
+export type Group = {
+  id: number;
+  name: string;
+  members: GroupMember[];
+};
+
 export type UserConfig = {
   id: number;
   wakawarsUsername: string;
   apiKey: string;
   friends: Friend[];
+  groups: Group[];
+  statsVisibility: StatsVisibility;
   passwordHash?: string | null;
 };
 
 export type PublicConfig = {
   wakawarsUsername: string;
   friends: FriendPublic[];
+  groups: Group[];
+  statsVisibility: StatsVisibility;
   hasApiKey: boolean;
   passwordSet: boolean;
 };
