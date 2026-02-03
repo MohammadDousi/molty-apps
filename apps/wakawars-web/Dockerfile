@@ -5,8 +5,8 @@ WORKDIR /app
 COPY . .
 
 RUN bun install --frozen-lockfile
-RUN bun -w packages/shared run build
-RUN bun -w apps/wakawars-web run build
+RUN cd packages/shared && bun run build
+RUN cd apps/wakawars-web && bun run build
 
 # Runtime stage
 FROM nginx:alpine
