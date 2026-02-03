@@ -16,6 +16,8 @@ model ww_user {
   friend_of         ww_friendship[] @relation("friend_friendships")
   sessions          ww_session[]
   daily_stats       ww_daily_stat[]
+  weekly_stats      ww_weekly_stat[]
+  provider_logs     ww_provider_log[]
   created_at        DateTime        @default(now())
   updated_at        DateTime        @updatedAt
 }
@@ -56,4 +58,41 @@ model ww_daily_stat {
 
   @@unique([user_id, date_key])
   @@index([date_key])
+}
+
+model ww_weekly_stat {
+  id                    Int      @id @default(autoincrement())
+  user_id               Int
+  user                  ww_user  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  range_key             String
+  total_seconds         Int      @default(0)
+  daily_average_seconds Int      @default(0)
+  status                String
+  error                 String?
+  fetched_at            DateTime @default(now())
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+
+  @@unique([user_id, range_key])
+  @@index([range_key])
+}
+
+model ww_provider_log {
+  id          Int      @id @default(autoincrement())
+  provider    String
+  user_id     Int?
+  user        ww_user? @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  endpoint    String
+  range_key   String?
+  status_code Int?
+  ok          Boolean  @default(false)
+  payload     Json?
+  error       String?
+  fetched_at  DateTime @default(now())
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@index([provider])
+  @@index([user_id])
+  @@index([endpoint])
 }

@@ -1,4 +1,4 @@
-import type { DailyStat, LeaderboardEntry, DailyStatStatus } from "./types.js";
+import type { DailyStat, DailyStatStatus } from "./types.js";
 
 const statusOrder: Record<DailyStatStatus, number> = {
   ok: 0,
@@ -7,7 +7,7 @@ const statusOrder: Record<DailyStatStatus, number> = {
   error: 3
 };
 
-export const sortStats = (stats: DailyStat[]): DailyStat[] => {
+export const sortStats = <T extends DailyStat>(stats: T[]): T[] => {
   return [...stats].sort((a, b) => {
     const statusDelta = statusOrder[a.status] - statusOrder[b.status];
     if (statusDelta !== 0) return statusDelta;
@@ -19,7 +19,10 @@ export const sortStats = (stats: DailyStat[]): DailyStat[] => {
   });
 };
 
-export const computeLeaderboard = (stats: DailyStat[], selfUsername: string): LeaderboardEntry[] => {
+export const computeLeaderboard = <T extends DailyStat>(
+  stats: T[],
+  selfUsername: string
+): Array<T & { rank: number | null; deltaSeconds: number }> => {
   const ordered = sortStats(stats);
   const selfEntry = ordered.find((entry) => entry.username === selfUsername);
   const selfSeconds = selfEntry?.totalSeconds ?? 0;

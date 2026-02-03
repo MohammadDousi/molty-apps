@@ -3,12 +3,15 @@ import {
   useEffect,
   useMemo,
   useState,
+  useRef,
   type FormEvent,
 } from "react";
 import type {
   LeaderboardResponse,
   PublicConfig,
   LeaderboardEntry,
+  WeeklyLeaderboardResponse,
+  WeeklyLeaderboardEntry,
 } from "@molty/shared";
 import { formatDuration } from "@molty/shared";
 
@@ -78,6 +81,8 @@ const App = () => {
   const [apiBase, setApiBase] = useState<string | null>(null);
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [stats, setStats] = useState<LeaderboardResponse | null>(null);
+  const [weeklyStats, setWeeklyStats] =
+    useState<WeeklyLeaderboardResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(() =>
@@ -90,6 +95,13 @@ const App = () => {
   const [friendInput, setFriendInput] = useState("");
   const [addFriendError, setAddFriendError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"league" | "settings">("league");
+  const [activeLeagueTab, setActiveLeagueTab] = useState<
+    "today" | "weekly"
+  >("today");
+  const [authView, setAuthView] = useState<"welcome" | "signin" | "signup">(
+    "welcome"
+  );
+  const authViewInitialized = useRef(false);
   const [showDockedAddFriend, setShowDockedAddFriend] = useState(true);
   const [launchAtLogin, setLaunchAtLogin] = useState<boolean | null>(null);
   const [launchAtLoginStatus, setLaunchAtLoginStatus] = useState<string | null>(
@@ -108,6 +120,8 @@ const App = () => {
 
   const isAuthenticated = Boolean(session?.authenticated);
   const isConfigured = Boolean(config?.wakawarsUsername && config?.hasApiKey);
+  const shouldIncludeWeekly =
+    activeLeagueTab === "weekly" || Boolean(weeklyStats);
 
   const request = useCallback(
     async <T,>(path: string, options?: RequestInit): Promise<T> => {
@@ -169,24 +183,61 @@ const App = () => {
   }, [isAuthenticated, request]);
 
   const loadStats = useCallback(
-    async (silent = false) => {
+    async ({
+      silent = false,
+      includeWeekly = false,
+    }: {
+      silent?: boolean;
+      includeWeekly?: boolean;
+    } = {}) => {
       if (!isConfigured || !isAuthenticated) return;
       if (!silent) {
         setLoading(true);
       }
       try {
-        const payload = await request<LeaderboardResponse>("/stats/today");
-        setStats(payload);
-        setError(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load stats");
+        const tasks: Array<
+          Promise<LeaderboardResponse | WeeklyLeaderboardResponse>
+        > = [request<LeaderboardResponse>("/stats/today")];
+
+        if (includeWeekly) {
+          tasks.push(request<WeeklyLeaderboardResponse>("/stats/weekly"));
+        }
+
+        const results = await Promise.allSettled(tasks);
+        let nextError: string | null = null;
+
+        const dailyResult = results[0];
+        if (dailyResult.status === "fulfilled") {
+          setStats(dailyResult.value as LeaderboardResponse);
+        } else {
+          nextError =
+            dailyResult.reason instanceof Error
+              ? dailyResult.reason.message
+              : "Failed to load stats";
+        }
+
+        if (includeWeekly) {
+          const weeklyResult = results[1];
+          if (weeklyResult?.status === "fulfilled") {
+            setWeeklyStats(weeklyResult.value as WeeklyLeaderboardResponse);
+          } else if (weeklyResult?.status === "rejected") {
+            if (activeLeagueTab === "weekly") {
+              nextError =
+                weeklyResult.reason instanceof Error
+                  ? weeklyResult.reason.message
+                  : "Failed to load weekly stats";
+            }
+          }
+        }
+
+        setError(nextError);
       } finally {
         if (!silent) {
           setLoading(false);
         }
       }
     },
-    [isConfigured, isAuthenticated, request]
+    [isConfigured, isAuthenticated, request, activeLeagueTab]
   );
 
   useEffect(() => {
@@ -245,17 +296,17 @@ const App = () => {
 
   useEffect(() => {
     if (!isConfigured || !isAuthenticated) return;
-    loadStats();
-  }, [isConfigured, isAuthenticated, loadStats]);
+    loadStats({ includeWeekly: shouldIncludeWeekly });
+  }, [isConfigured, isAuthenticated, shouldIncludeWeekly, loadStats]);
 
   useEffect(() => {
     if (!isConfigured || !isAuthenticated) return;
     const intervalId = window.setInterval(() => {
-      loadStats(true);
+      loadStats({ silent: true, includeWeekly: shouldIncludeWeekly });
     }, 15 * 60 * 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [isConfigured, isAuthenticated, loadStats]);
+  }, [isConfigured, isAuthenticated, shouldIncludeWeekly, loadStats]);
 
   useEffect(() => {
     if (session?.wakawarsUsername && !login.username) {
@@ -265,6 +316,16 @@ const App = () => {
       }));
     }
   }, [session?.wakawarsUsername, login.username]);
+
+  useEffect(() => {
+    if (!session || authViewInitialized.current) return;
+    if (session.hasUser && !session.authenticated) {
+      setAuthView("signin");
+    } else {
+      setAuthView("welcome");
+    }
+    authViewInitialized.current = true;
+  }, [session]);
 
   const handleOnboardingSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -290,7 +351,7 @@ const App = () => {
       }
       setOnboarding(initialOnboardingState);
       setError(null);
-      await loadStats(true);
+      await loadStats({ silent: true, includeWeekly: shouldIncludeWeekly });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save config");
     } finally {
@@ -324,7 +385,7 @@ const App = () => {
       setLogin(initialLoginState);
       setError(null);
       await loadConfig();
-      await loadStats(true);
+      await loadStats({ silent: true, includeWeekly: shouldIncludeWeekly });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to login");
     } finally {
@@ -358,7 +419,7 @@ const App = () => {
 
       setPasswordForm(initialPasswordState);
       await loadConfig();
-      await loadStats(true);
+      await loadStats({ silent: true, includeWeekly: shouldIncludeWeekly });
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to set password");
@@ -384,7 +445,7 @@ const App = () => {
       setFriendInput("");
       setError(null);
       setAddFriendError(null);
-      await loadStats(true);
+      await loadStats({ silent: true, includeWeekly: shouldIncludeWeekly });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to add friend";
@@ -444,19 +505,66 @@ const App = () => {
     setError(null);
     loadSession();
     loadConfig();
-    loadStats(true);
+    loadStats({ silent: true, includeWeekly: shouldIncludeWeekly });
   };
 
   const lastUpdated = useMemo(() => {
-    if (!stats?.updatedAt) return "";
-    const date = new Date(stats.updatedAt);
+    const updatedAt =
+      activeLeagueTab === "weekly" ? weeklyStats?.updatedAt : stats?.updatedAt;
+    if (!updatedAt) return "";
+    const date = new Date(updatedAt);
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }, [stats?.updatedAt]);
+  }, [activeLeagueTab, stats?.updatedAt, weeklyStats?.updatedAt]);
+
+  const hasStoredSession = Boolean(sessionId);
+  const showMainLoading =
+    hasStoredSession && (!session || (session.authenticated && !config));
+
+  const weeklyRangeLabel = useMemo(() => {
+    if (!weeklyStats?.range) return "Last 7 days";
+    if (weeklyStats.range === "last_7_days") return "Last 7 days";
+    if (weeklyStats.range === "this_week") return "This week";
+    return weeklyStats.range.replace(/_/g, " ");
+  }, [weeklyStats?.range]);
 
   const showLogin = Boolean(session?.hasUser && !session?.authenticated);
+  const showAuth = !isAuthenticated;
+  const showWelcome = showAuth && authView === "welcome";
+  const showSignIn = showAuth && authView === "signin";
+  const showSignUp = showAuth && authView === "signup";
   const canShowSettings = Boolean(isConfigured && isAuthenticated);
   const showSettings = Boolean(canShowSettings && activeTab === "settings");
   const passwordActionLabel = "Set password";
+
+  if (showMainLoading) {
+    return (
+      <div className="app">
+        <header className="header">
+          <div>
+            <h1>WakaWars</h1>
+          </div>
+          <div className="header-meta" />
+        </header>
+        {error && (
+          <div className="error">
+            <span>{error}</span>
+            <button className="ghost tiny" onClick={handleRetry}>
+              Retry
+            </button>
+          </div>
+        )}
+        <section className="card">
+          <div className="section-header">
+            <div className="section-title">
+              <h2>Today</h2>
+              <span className="muted">Restoring session</span>
+            </div>
+          </div>
+          <p className="muted">Loading your league...</p>
+        </section>
+      </div>
+    );
+  }
 
   if (!session) {
     return (
@@ -476,7 +584,7 @@ const App = () => {
   }
 
   const showDockedAdd = Boolean(
-    showDockedAddFriend && isConfigured && !showLogin && !showSettings
+    showDockedAddFriend && isConfigured && isAuthenticated && !showSettings
   );
 
   return (
@@ -489,7 +597,7 @@ const App = () => {
           {canShowSettings && (
             <button
               type="button"
-              className={`icon-button ${
+              className={`icon-button ghost-button ${
                 activeTab === "settings" ? "active" : ""
               }`}
               onClick={() =>
@@ -514,9 +622,47 @@ const App = () => {
         </div>
       )}
 
-      {showLogin ? (
+      {showWelcome ? (
+        <section className="card welcome-card">
+          <div className="app-logo" aria-hidden="true">
+            <div className="logo-orbit" />
+            <div className="logo-core">W</div>
+          </div>
+          <h2>Welcome to WakaWars</h2>
+          <p className="muted">
+            Start a rivalry with friends and track your WakaTime focus.
+          </p>
+          <div className="row welcome-actions">
+            <button
+              className="primary"
+              type="button"
+              onClick={() => setAuthView("signup")}
+            >
+              Sign up
+            </button>
+            <button
+              className="ghost"
+              type="button"
+              onClick={() => setAuthView("signin")}
+            >
+              Sign in
+            </button>
+          </div>
+        </section>
+      ) : showSignIn ? (
         <section className="card">
-          <h2>Welcome back</h2>
+          <div className="section-header">
+            <h2>Sign in</h2>
+            {!showLogin && (
+              <button
+                className="ghost tiny"
+                type="button"
+                onClick={() => setAuthView("welcome")}
+              >
+                Back
+              </button>
+            )}
+          </div>
           <p className="muted">
             Enter your WakaWars credentials to unlock this device.
           </p>
@@ -553,15 +699,34 @@ const App = () => {
               />
             </label>
             <button className="primary" type="submit" disabled={loading}>
-              Unlock
+              Sign in
             </button>
           </form>
+          <div className="inline-action">
+            <span className="muted">New here?</span>
+            <button
+              className="ghost tiny"
+              type="button"
+              onClick={() => setAuthView("signup")}
+            >
+              Create account
+            </button>
+          </div>
         </section>
-      ) : !isConfigured ? (
+      ) : showSignUp ? (
         <section className="card">
-          <h2>Get started</h2>
+          <div className="section-header">
+            <h2>Create account</h2>
+            <button
+              className="ghost tiny"
+              type="button"
+              onClick={() => setAuthView(showLogin ? "signin" : "welcome")}
+            >
+              Back
+            </button>
+          </div>
           <p className="muted">
-            Create your WakaWars identity and connect your WakaTime API key.
+            Set your WakaWars username and connect your WakaTime token.
           </p>
           <form className="stack" onSubmit={handleOnboardingSubmit}>
             <label>
@@ -581,7 +746,7 @@ const App = () => {
               />
             </label>
             <label>
-              WakaTime API key
+              WakaTime token
               <input
                 type="password"
                 value={onboarding.apiKey}
@@ -591,15 +756,25 @@ const App = () => {
                     apiKey: event.target.value,
                   }))
                 }
-                placeholder="api_key"
+                placeholder="wakatime_token"
                 required
                 disabled={loading}
               />
             </label>
             <button className="primary" type="submit" disabled={loading}>
-              Save
+              Create account
             </button>
           </form>
+          <div className="inline-action">
+            <span className="muted">Already have an account?</span>
+            <button
+              className="ghost tiny"
+              type="button"
+              onClick={() => setAuthView("signin")}
+            >
+              Sign in
+            </button>
+          </div>
         </section>
       ) : showSettings ? (
         <>
@@ -737,12 +912,53 @@ const App = () => {
         <>
           <section className="card">
             <div className="section-header">
-              <h2>Today</h2>
-              {lastUpdated && (
-                <span className="muted">Updated {lastUpdated}</span>
-              )}
+              <div className="section-title">
+                <h2>{activeLeagueTab === "weekly" ? "Weekly" : "Today"}</h2>
+                {activeLeagueTab === "weekly" && (
+                  <span className="muted">{weeklyRangeLabel}</span>
+                )}
+              </div>
+              <div className="section-actions">
+                {lastUpdated && (
+                  <span className="muted">Updated {lastUpdated}</span>
+                )}
+                <div className="tab-group">
+                  <button
+                    type="button"
+                    className={`tab-button ${
+                      activeLeagueTab === "today" ? "active" : ""
+                    }`}
+                    onClick={() => setActiveLeagueTab("today")}
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    className={`tab-button ${
+                      activeLeagueTab === "weekly" ? "active" : ""
+                    }`}
+                    onClick={() => setActiveLeagueTab("weekly")}
+                  >
+                    Week
+                  </button>
+                </div>
+              </div>
             </div>
-            {stats ? (
+            {activeLeagueTab === "weekly" ? (
+              weeklyStats ? (
+                <div className="list">
+                  {weeklyStats.entries.map((entry) => (
+                    <WeeklyLeaderboardRow
+                      key={entry.username}
+                      entry={entry}
+                      isSelf={entry.username === config?.wakawarsUsername}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="muted">No weekly stats yet.</p>
+              )
+            ) : stats ? (
               <div className="list">
                 {stats.entries.map((entry) => (
                   <LeaderboardRow
@@ -779,17 +995,29 @@ const App = () => {
   );
 };
 
-const statusLabel = (entry: LeaderboardEntry): string | null => {
-  if (entry.status === "ok") {
-    return formatDuration(entry.totalSeconds);
+const statusLabel = (
+  status: LeaderboardEntry["status"],
+  totalSeconds: number
+): string | null => {
+  if (status === "ok") {
+    return formatDuration(totalSeconds);
   }
-  if (entry.status === "private") {
+  if (status === "private") {
     return null;
   }
-  if (entry.status === "not_found") {
+  if (status === "not_found") {
     return "Not found";
   }
   return "Error";
+};
+
+const rankDisplay = (rank: number | null) => {
+  const medal =
+    rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : null;
+  return {
+    rankLabel: medal ?? (rank ? `#${rank}` : "—"),
+    podiumClass: rank && rank <= 3 ? `podium podium-${rank}` : ""
+  };
 };
 
 const LeaderboardRow = ({
@@ -799,18 +1027,8 @@ const LeaderboardRow = ({
   entry: LeaderboardEntry;
   isSelf: boolean;
 }) => {
-  const medal =
-    entry.rank === 1
-      ? "🥇"
-      : entry.rank === 2
-      ? "🥈"
-      : entry.rank === 3
-      ? "🥉"
-      : null;
-  const podiumClass =
-    entry.rank && entry.rank <= 3 ? `podium podium-${entry.rank}` : "";
-  const rankLabel = medal ?? (entry.rank ? `#${entry.rank}` : "—");
-  const timeLabel = statusLabel(entry);
+  const { rankLabel, podiumClass } = rankDisplay(entry.rank);
+  const timeLabel = statusLabel(entry.status, entry.totalSeconds);
 
   return (
     <div className={`row-item ${isSelf ? "self" : ""} ${podiumClass}`}>
@@ -821,6 +1039,44 @@ const LeaderboardRow = ({
             <span>{entry.username}</span>
             {isSelf && <span className="badge">YOU</span>}
           </div>
+        </div>
+      </div>
+      <div className="row-meta">
+        <div className="row-meta-top">
+          <span className="rank-display">{rankLabel}</span>
+          {timeLabel && <span className="time">{timeLabel}</span>}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const WeeklyLeaderboardRow = ({
+  entry,
+  isSelf,
+}: {
+  entry: WeeklyLeaderboardEntry;
+  isSelf: boolean;
+}) => {
+  const { rankLabel, podiumClass } = rankDisplay(entry.rank);
+  const timeLabel = statusLabel(entry.status, entry.totalSeconds);
+  const averageLabel =
+    entry.status === "ok" ? formatDuration(entry.dailyAverageSeconds) : null;
+
+  return (
+    <div className={`row-item ${isSelf ? "self" : ""} ${podiumClass}`}>
+      <div className="row-item-left">
+        <div className="avatar">{entry.username.slice(0, 1).toUpperCase()}</div>
+        <div className="row-content">
+          <div className="row-title">
+            <span>{entry.username}</span>
+            {isSelf && <span className="badge">YOU</span>}
+          </div>
+          {averageLabel && (
+            <div className="row-sub">
+              <span>Avg {averageLabel}/day</span>
+            </div>
+          )}
         </div>
       </div>
       <div className="row-meta">

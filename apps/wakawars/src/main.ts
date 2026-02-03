@@ -188,7 +188,7 @@ const getLoginItemSettings = () => {
 };
 
 const setLoginItemSettings = (openAtLogin: boolean) => {
-  const settings: Electron.LoginItemSettings = { openAtLogin };
+  const settings: Electron.Settings = { openAtLogin };
   if (process.platform === "darwin") {
     if (isMacOS13OrNewer) {
       settings.type = "mainAppService";

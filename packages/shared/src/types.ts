@@ -42,3 +42,22 @@ export type LeaderboardResponse = {
   updatedAt: string;
   entries: LeaderboardEntry[];
 };
+
+export type WeeklyStat = {
+  username: string; // WakaWars username
+  totalSeconds: number;
+  dailyAverageSeconds: number;
+  status: DailyStatStatus;
+  error?: string | null;
+};
+
+export type WeeklyLeaderboardEntry = WeeklyStat & {
+  rank: number | null;
+  deltaSeconds: number;
+};
+
+export type WeeklyLeaderboardResponse = {
+  range: string;
+  updatedAt: string;
+  entries: WeeklyLeaderboardEntry[];
+};

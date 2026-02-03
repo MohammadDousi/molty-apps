@@ -7,11 +7,14 @@ import type {
   UserConfig,
   DailyStat,
   LeaderboardResponse,
+  WeeklyStat,
+  WeeklyLeaderboardResponse,
 } from "@molty/shared";
 import { createWakaTimeClient } from "./wakatime.js";
 import {
   createWakaTimeSync,
   DEFAULT_WAKATIME_SYNC_INTERVAL_MS,
+  DEFAULT_WAKATIME_WEEKLY_RANGE,
 } from "./wakatime-sync.js";
 import { createPrismaClient } from "./db.js";
 import { createPrismaRepository, type UserRepository } from "./repository.js";
@@ -31,6 +34,7 @@ export type ServerOptions = {
   sessionStore?: SessionStore;
   enableStatusSync?: boolean;
   statusSyncIntervalMs?: number;
+  weeklyRangeKey?: string;
 };
 
 const toPublicConfig = (config: UserConfig): PublicConfig => ({
@@ -69,6 +73,7 @@ export const createServer = ({
   sessionStore,
   enableStatusSync,
   statusSyncIntervalMs,
+  weeklyRangeKey,
 }: ServerOptions) => {
   const prisma = repository ? null : createPrismaClient(databaseUrl);
   const store = repository ?? createPrismaRepository(prisma!);
@@ -80,8 +85,10 @@ export const createServer = ({
     store,
     wakatime,
     intervalMs: statusSyncIntervalMs ?? DEFAULT_WAKATIME_SYNC_INTERVAL_MS,
+    weeklyRangeKey: weeklyRangeKey ?? DEFAULT_WAKATIME_WEEKLY_RANGE,
   });
   const shouldSync = enableStatusSync ?? true;
+  const rangeKey = weeklyRangeKey ?? DEFAULT_WAKATIME_WEEKLY_RANGE;
 
   const requireSession = async (
     headers: Record<string, string | undefined>,
@@ -267,6 +274,12 @@ export const createServer = ({
               apiKey,
             });
             const sessionId = await sessions.create(created.id);
+            if (shouldSync) {
+              void statusSync.syncUser({
+                id: created.id,
+                apiKey: created.apiKey,
+              });
+            }
 
             return { sessionId, config: toPublicConfig(created) };
           },
@@ -430,6 +443,76 @@ export const createServer = ({
 
           const response: LeaderboardResponse = {
             date: dateKey,
+            updatedAt: new Date(updatedAtEpoch).toISOString(),
+            entries,
+          };
+
+          return response;
+        })
+        .get("/stats/weekly", async ({ set, headers }) => {
+          const authCheck = await requireSession(headers, set);
+          if (!authCheck.ok) {
+            return { error: "Unauthorized" };
+          }
+
+          const config = await store.getUserById(authCheck.user.id);
+          if (!config) {
+            set.status = 401;
+            return { error: "Unauthorized" };
+          }
+
+          if (!config.wakawarsUsername || !config.apiKey) {
+            set.status = 400;
+            return { error: "App is not configured" };
+          }
+
+          const users = [
+            {
+              id: config.id,
+              username: config.wakawarsUsername,
+            },
+            ...config.friends.map((friend) => ({
+              id: friend.id,
+              username: friend.username,
+            })),
+          ];
+
+          const weeklyStats = await store.getWeeklyStats({
+            userIds: users.map((user) => user.id),
+            rangeKey,
+          });
+          const statsByUserId = new Map(
+            weeklyStats.map((stat) => [stat.userId, stat])
+          );
+
+          const stats: WeeklyStat[] = users.map((user) => {
+            const stat = statsByUserId.get(user.id);
+            if (!stat) {
+              return {
+                username: user.username,
+                totalSeconds: 0,
+                dailyAverageSeconds: 0,
+                status: "error",
+                error: "No stats synced yet",
+              };
+            }
+
+            return {
+              username: user.username,
+              totalSeconds: stat.totalSeconds,
+              dailyAverageSeconds: stat.dailyAverageSeconds,
+              status: stat.status,
+              error: stat.error ?? null,
+            };
+          });
+
+          const entries = computeLeaderboard(stats, config.wakawarsUsername);
+          const updatedAtEpoch = weeklyStats.length
+            ? Math.max(...weeklyStats.map((stat) => stat.fetchedAt.getTime()))
+            : Date.now();
+
+          const response: WeeklyLeaderboardResponse = {
+            range: rangeKey,
             updatedAt: new Date(updatedAtEpoch).toISOString(),
             entries,
           };

@@ -10,6 +10,28 @@ export type DailyStatRecord = {
   fetchedAt: Date;
 };
 
+export type WeeklyStatRecord = {
+  userId: number;
+  username: string;
+  totalSeconds: number;
+  dailyAverageSeconds: number;
+  status: DailyStatStatus;
+  error: string | null;
+  fetchedAt: Date;
+};
+
+export type ProviderLogRecord = {
+  provider: string;
+  userId?: number | null;
+  endpoint: string;
+  rangeKey?: string | null;
+  statusCode?: number | null;
+  ok: boolean;
+  payload?: unknown | null;
+  error?: string | null;
+  fetchedAt: Date;
+};
+
 export type UserRepository = {
   countUsers: () => Promise<number>;
   listUsers: () => Promise<Array<{ id: number; wakawarsUsername: string; apiKey: string }>>;
@@ -39,6 +61,20 @@ export type UserRepository = {
     userIds: number[];
     dateKey: string;
   }) => Promise<DailyStatRecord[]>;
+  upsertWeeklyStat: (input: {
+    userId: number;
+    rangeKey: string;
+    totalSeconds: number;
+    dailyAverageSeconds: number;
+    status: DailyStatStatus;
+    error?: string | null;
+    fetchedAt: Date;
+  }) => Promise<void>;
+  getWeeklyStats: (input: {
+    userIds: number[];
+    rangeKey: string;
+  }) => Promise<WeeklyStatRecord[]>;
+  createProviderLog: (input: ProviderLogRecord) => Promise<void>;
 };
 
 type PrismaUser = {
@@ -307,6 +343,112 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     }));
   };
 
+  const upsertWeeklyStat = async ({
+    userId,
+    rangeKey,
+    totalSeconds,
+    dailyAverageSeconds,
+    status,
+    error,
+    fetchedAt
+  }: {
+    userId: number;
+    rangeKey: string;
+    totalSeconds: number;
+    dailyAverageSeconds: number;
+    status: DailyStatStatus;
+    error?: string | null;
+    fetchedAt: Date;
+  }) => {
+    await prisma.ww_weekly_stat.upsert({
+      where: {
+        user_id_range_key: {
+          user_id: userId,
+          range_key: rangeKey
+        }
+      },
+      create: {
+        user_id: userId,
+        range_key: rangeKey,
+        total_seconds: totalSeconds,
+        daily_average_seconds: dailyAverageSeconds,
+        status,
+        error: error ?? null,
+        fetched_at: fetchedAt
+      },
+      update: {
+        total_seconds: totalSeconds,
+        daily_average_seconds: dailyAverageSeconds,
+        status,
+        error: error ?? null,
+        fetched_at: fetchedAt
+      }
+    });
+  };
+
+  const getWeeklyStats = async ({
+    userIds,
+    rangeKey
+  }: {
+    userIds: number[];
+    rangeKey: string;
+  }): Promise<WeeklyStatRecord[]> => {
+    if (userIds.length === 0) {
+      return [];
+    }
+
+    const stats = await prisma.ww_weekly_stat.findMany({
+      where: {
+        user_id: { in: userIds },
+        range_key: rangeKey
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            wakawars_username: true
+          }
+        }
+      }
+    });
+
+    return stats.map((stat) => ({
+      userId: stat.user_id,
+      username: stat.user.wakawars_username,
+      totalSeconds: stat.total_seconds,
+      dailyAverageSeconds: stat.daily_average_seconds,
+      status: stat.status as DailyStatStatus,
+      error: stat.error ?? null,
+      fetchedAt: stat.fetched_at
+    }));
+  };
+
+  const createProviderLog = async ({
+    provider,
+    userId,
+    endpoint,
+    rangeKey,
+    statusCode,
+    ok,
+    payload,
+    error,
+    fetchedAt
+  }: ProviderLogRecord) => {
+    await prisma.ww_provider_log.create({
+      data: {
+        provider,
+        user_id: userId ?? null,
+        endpoint,
+        range_key: rangeKey ?? null,
+        status_code: statusCode ?? null,
+        ok,
+        payload: payload ?? null,
+        error: error ?? null,
+        fetched_at: fetchedAt
+      }
+    });
+  };
+
   return {
     countUsers,
     listUsers,
@@ -319,6 +461,9 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     removeFriendship,
     searchUsers,
     upsertDailyStat,
-    getDailyStats
+    getDailyStats,
+    upsertWeeklyStat,
+    getWeeklyStats,
+    createProviderLog
   };
 };
