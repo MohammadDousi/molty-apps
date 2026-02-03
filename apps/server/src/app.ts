@@ -11,11 +11,12 @@ import type {
   WeeklyLeaderboardResponse,
 } from "@molty/shared";
 import { createWakaTimeClient } from "./wakatime.js";
+import { createWakaTimeSync, DEFAULT_WAKATIME_SYNC_INTERVAL_MS } from "./wakatime-sync.js";
 import {
-  createWakaTimeSync,
-  DEFAULT_WAKATIME_SYNC_INTERVAL_MS,
+  createWakaTimeWeeklyCache,
+  DEFAULT_WAKATIME_WEEKLY_CACHE_INTERVAL_MS,
   DEFAULT_WAKATIME_WEEKLY_RANGE,
-} from "./wakatime-sync.js";
+} from "./wakatime-weekly-cache.js";
 import { createPrismaClient } from "./db.js";
 import { createPrismaRepository, type UserRepository } from "./repository.js";
 import { hashPassword, verifyPassword } from "./auth.js";
@@ -34,6 +35,8 @@ export type ServerOptions = {
   sessionStore?: SessionStore;
   enableStatusSync?: boolean;
   statusSyncIntervalMs?: number;
+  enableWeeklyCache?: boolean;
+  weeklyCacheIntervalMs?: number;
   weeklyRangeKey?: string;
 };
 
@@ -82,6 +85,8 @@ export const createServer = ({
   sessionStore,
   enableStatusSync,
   statusSyncIntervalMs,
+  enableWeeklyCache,
+  weeklyCacheIntervalMs,
   weeklyRangeKey,
 }: ServerOptions) => {
   const prisma = repository ? null : createPrismaClient(databaseUrl);
@@ -90,14 +95,20 @@ export const createServer = ({
   const sessions =
     sessionStore ??
     (prisma ? createPrismaSessionStore(prisma) : createMemorySessionStore());
+  const rangeKey = weeklyRangeKey ?? DEFAULT_WAKATIME_WEEKLY_RANGE;
   const statusSync = createWakaTimeSync({
     store,
     wakatime,
     intervalMs: statusSyncIntervalMs ?? DEFAULT_WAKATIME_SYNC_INTERVAL_MS,
-    weeklyRangeKey: weeklyRangeKey ?? DEFAULT_WAKATIME_WEEKLY_RANGE,
   });
   const shouldSync = enableStatusSync ?? true;
-  const rangeKey = weeklyRangeKey ?? DEFAULT_WAKATIME_WEEKLY_RANGE;
+  const weeklyCache = createWakaTimeWeeklyCache({
+    store,
+    wakatime,
+    intervalMs: weeklyCacheIntervalMs ?? DEFAULT_WAKATIME_WEEKLY_CACHE_INTERVAL_MS,
+    weeklyRangeKey: rangeKey,
+  });
+  const shouldCacheWeekly = enableWeeklyCache ?? shouldSync;
 
   const requireSession = async (
     headers: Record<string, string | undefined>,
@@ -285,6 +296,12 @@ export const createServer = ({
             const sessionId = await sessions.create(created.id);
             if (shouldSync) {
               void statusSync.syncUser({
+                id: created.id,
+                apiKey: created.apiKey,
+              });
+            }
+            if (shouldCacheWeekly) {
+              void weeklyCache.syncUser({
                 id: created.id,
                 apiKey: created.apiKey,
               });
@@ -691,12 +708,9 @@ export const createServer = ({
             .map((id) => usersById.get(id))
             .filter((user): user is NonNullable<typeof user> => Boolean(user));
 
-          const weeklyStats = await store.getWeeklyStats({
-            userIds,
-            rangeKey,
-          });
+          const weeklyStats = weeklyCache.getStats({ userIds, rangeKey });
           const statsByUserId = new Map(
-            weeklyStats.map((stat) => [stat.userId, stat])
+            weeklyStats.map((stat) => [stat.userId, stat.result])
           );
           const incomingFriendIds = new Set(
             await store.getIncomingFriendIds(config.id, userIds)
@@ -747,7 +761,7 @@ export const createServer = ({
 
           const entries = computeLeaderboard(stats, config.wakawarsUsername);
           const updatedAtEpoch = weeklyStats.length
-            ? Math.max(...weeklyStats.map((stat) => stat.fetchedAt.getTime()))
+            ? Math.max(...weeklyStats.map((stat) => stat.result.fetchedAt))
             : Date.now();
 
           const response: WeeklyLeaderboardResponse = {
@@ -765,6 +779,9 @@ export const createServer = ({
     if (shouldSync) {
       statusSync.start();
     }
+    if (shouldCacheWeekly) {
+      weeklyCache.start();
+    }
     return app;
   };
 
@@ -779,8 +796,9 @@ export const createServer = ({
       await new Promise<void>((resolve) => app.server?.close(() => resolve()));
     }
     statusSync.stop();
+    weeklyCache.stop();
     await disconnect();
   };
 
-  return { app, listen, store, disconnect, close, statusSync };
+  return { app, listen, store, disconnect, close, statusSync, weeklyCache };
 };

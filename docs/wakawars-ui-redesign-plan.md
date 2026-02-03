@@ -1,7 +1,7 @@
 # WakaWars UI Redesign Plan
 
 **Current State (Repo Analysis)**
-The renderer UI is a single file (`apps/wakawars/src/renderer/App.tsx`) with all flows (welcome, sign‑in, sign‑up, league, settings) and a single stylesheet (`apps/wakawars/src/renderer/styles.css`). The league view shows a flat list of rows with rank/time on the right and a docked “Add friend” card. Settings are a linear stack of cards. Data inputs are limited to daily and weekly leaderboard responses, session state, and configuration. There is no existing component or design system, and UI logic is intertwined with data loading and session state. The shared package provides leaderboard ranking helpers and is already tested with Vitest (`packages/shared/test/leaderboard.test.ts`).
+The renderer UI is a single file (`apps/wakawars-web/src/App.tsx`) with all flows (welcome, sign‑in, sign‑up, league, settings) and a single stylesheet (`apps/wakawars-web/src/styles.css`). The league view shows a flat list of rows with rank/time on the right and a docked “Add friend” card. Settings are a linear stack of cards. Data inputs are limited to daily and weekly leaderboard responses, session state, and configuration. There is no existing component or design system, and UI logic is intertwined with data loading and session state. The shared package provides leaderboard ranking helpers and is already tested with Vitest (`packages/shared/test/leaderboard.test.ts`).
 
 **Constraints**
 The app runs as a macOS menu bar utility, so dense, glanceable UI with clear hierarchy is necessary. Data is local‑first and limited to daily/weekly totals, ranks, and status states (`ok`, `private`, `not_found`, `error`). The redesign must not assume new API endpoints or additional metrics.
@@ -93,6 +93,5 @@ Proposal A is the best fit because it maximizes competitive clarity while stayin
 
 ## Implementation Targets (What Will Change)
 1. **Shared**: new helper in `packages/shared/src/leaderboard.ts` and tests.
-2. **Renderer**: new leaderboard layout and summary cards in `apps/wakawars/src/renderer/App.tsx`.
-3. **Styles**: new layout and component styles in `apps/wakawars/src/renderer/styles.css`.
-
+2. **Renderer**: new leaderboard layout and summary cards in `apps/wakawars-web/src/App.tsx`.
+3. **Styles**: new layout and component styles in `apps/wakawars-web/src/styles.css`.

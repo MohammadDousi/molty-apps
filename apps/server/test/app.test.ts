@@ -404,9 +404,43 @@ describe("server app", () => {
 
   it("returns weekly leaderboard stats sorted by total time", async () => {
     const repository = createMemoryRepository();
-    const { app, store } = createServer({
+    const weeklyStatsByKey = new Map([
+      ["key-mo", { totalSeconds: 7200, dailyAverageSeconds: 1028 }],
+      ["key-amy", { totalSeconds: 14400, dailyAverageSeconds: 2057 }],
+      ["key-ben", { totalSeconds: 3600, dailyAverageSeconds: 514 }]
+    ]);
+    const fetcher: typeof fetch = async (_input, init) => {
+      const headers = init?.headers as Record<string, string> | undefined;
+      const authHeader = headers?.Authorization ?? headers?.authorization ?? "";
+      const encoded = authHeader.replace(/^Basic\s+/i, "");
+      const decoded = Buffer.from(encoded, "base64").toString("utf8");
+      const apiKey = decoded.split(":")[0] ?? "";
+      const stat = weeklyStatsByKey.get(apiKey);
+
+      if (!stat) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 403,
+          headers: { "content-type": "application/json" }
+        });
+      }
+
+      return new Response(
+        JSON.stringify({
+          data: {
+            total_seconds: stat.totalSeconds,
+            daily_average: stat.dailyAverageSeconds
+          }
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
+    };
+    const { app, weeklyCache } = createServer({
       port: 0,
       repository,
+      fetcher,
       enableStatusSync: false
     });
 
@@ -417,7 +451,7 @@ describe("server app", () => {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             wakawarsUsername: "mo",
-            apiKey: "key"
+            apiKey: "key-mo"
           })
         })
       )
@@ -429,7 +463,7 @@ describe("server app", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           wakawarsUsername: "amy",
-          apiKey: "key"
+          apiKey: "key-amy"
         })
       })
     );
@@ -440,7 +474,7 @@ describe("server app", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           wakawarsUsername: "ben",
-          apiKey: "key"
+          apiKey: "key-ben"
         })
       })
     );
@@ -467,38 +501,7 @@ describe("server app", () => {
       })
     );
 
-    const rangeKey = "last_7_days";
-    const now = new Date();
-    const mo = await store.getUserByUsername("mo");
-    const amy = await store.getUserByUsername("amy");
-    const ben = await store.getUserByUsername("ben");
-    await store.upsertWeeklyStat({
-      userId: mo!.id,
-      rangeKey,
-      totalSeconds: 7200,
-      dailyAverageSeconds: 1028,
-      status: "ok",
-      error: null,
-      fetchedAt: now
-    });
-    await store.upsertWeeklyStat({
-      userId: amy!.id,
-      rangeKey,
-      totalSeconds: 14400,
-      dailyAverageSeconds: 2057,
-      status: "ok",
-      error: null,
-      fetchedAt: now
-    });
-    await store.upsertWeeklyStat({
-      userId: ben!.id,
-      rangeKey,
-      totalSeconds: 3600,
-      dailyAverageSeconds: 514,
-      status: "ok",
-      error: null,
-      fetchedAt: now
-    });
+    await weeklyCache.runOnce();
 
     const statsResponse = await app.handle(
       new Request("http://localhost/wakawars/v0/stats/weekly", {

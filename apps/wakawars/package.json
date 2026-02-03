@@ -5,19 +5,16 @@
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
-    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:main\" \"npm:dev:electron\"",
-    "dev:renderer": "wait-on ../../packages/shared/dist/index.js && vite --port 5173",
+    "dev": "concurrently -k \"npm:dev:main\" \"npm:dev:electron\"",
     "dev:main": "tsc -p tsconfig.main.json --watch",
-    "dev:electron": "wait-on dist/main.js && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron dist/main.js",
-    "build": "npm run build:main && npm run build:renderer",
+    "dev:electron": "wait-on dist/main.js http-get://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron dist/main.js",
+    "build": "npm run build:main",
     "build:main": "tsc -p tsconfig.main.json",
-    "build:renderer": "vite build",
     "pack": "npm run build && electron-builder --mac --publish=never",
     "dist": "npm run build && electron-builder --mac --publish=always",
     "lint": "echo \"lint not configured\""
   },
   "dependencies": {
-    "@molty/shared": "workspace:*",
     "argparse": "^2.0.1",
     "builder-util-runtime": "^9.2.10",
     "debug": "^4.3.4",
@@ -30,8 +27,6 @@
     "lodash.escaperegexp": "^4.1.2",
     "lodash.isequal": "^4.5.0",
     "ms": "^2.1.3",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
     "sax": "^1.2.4",
     "semver": "^7.7.3",
     "tiny-typed-emitter": "^2.1.0",
@@ -40,15 +35,11 @@
   "devDependencies": {
     "@electron/notarize": "^2.3.2",
     "@types/node": "^22.10.2",
-    "@types/react": "^18.2.79",
-    "@types/react-dom": "^18.2.25",
-    "@vitejs/plugin-react": "^4.3.2",
     "concurrently": "^9.1.0",
     "cross-env": "^7.0.3",
     "electron": "^31.2.0",
     "electron-builder": "^24.13.3",
     "typescript": "^5.6.3",
-    "vite": "^5.4.8",
     "wait-on": "^7.2.0"
   },
   "build": {

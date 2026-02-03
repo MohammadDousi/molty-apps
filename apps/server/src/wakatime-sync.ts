@@ -1,14 +1,13 @@
 import type { UserRepository } from "./repository.js";
 import type { WakaTimeClient } from "./wakatime.js";
+export { DEFAULT_WAKATIME_WEEKLY_RANGE } from "./wakatime-weekly-cache.js";
 
 export const DEFAULT_WAKATIME_SYNC_INTERVAL_MS = 15 * 60 * 1000;
-export const DEFAULT_WAKATIME_WEEKLY_RANGE = "last_7_days";
 
 export type WakaTimeSyncOptions = {
   store: UserRepository;
   wakatime: WakaTimeClient;
   intervalMs?: number;
-  weeklyRangeKey?: string;
   onError?: (error: unknown) => void;
 };
 
@@ -25,7 +24,6 @@ export const createWakaTimeSync = ({
   store,
   wakatime,
   intervalMs = DEFAULT_WAKATIME_SYNC_INTERVAL_MS,
-  weeklyRangeKey = DEFAULT_WAKATIME_WEEKLY_RANGE,
   onError
 }: WakaTimeSyncOptions): WakaTimeSync => {
   let timer: NodeJS.Timeout | null = null;
@@ -55,10 +53,7 @@ export const createWakaTimeSync = ({
         }))
         .filter((user) => Boolean(user.apiKey))
         .map(async (user) => {
-          const [dailyResult, weeklyResult] = await Promise.all([
-            wakatime.getStatusBarToday("current", user.apiKey),
-            wakatime.getStatsRange(weeklyRangeKey, user.apiKey)
-          ]);
+          const dailyResult = await wakatime.getStatusBarToday("current", user.apiKey);
 
           const dailyLog = store.createProviderLog({
             provider: "wakatime",
@@ -72,45 +67,19 @@ export const createWakaTimeSync = ({
             fetchedAt: new Date(dailyResult.fetchedAt)
           });
 
-          const weeklyLog = store.createProviderLog({
-            provider: "wakatime",
-            userId: user.id,
-            endpoint: "stats",
-            rangeKey: weeklyRangeKey,
-            statusCode: weeklyResult.responseStatus ?? null,
-            ok: weeklyResult.responseOk ?? false,
-            payload: weeklyResult.payload ?? null,
-            error: weeklyResult.error ?? weeklyResult.networkError ?? null,
-            fetchedAt: new Date(weeklyResult.fetchedAt)
-          });
-
           const logTasks: Promise<void>[] = [];
           if (!dailyResult.fromCache || dailyResult.networkError) {
             logTasks.push(dailyLog);
           }
-          if (!weeklyResult.fromCache || weeklyResult.networkError) {
-            logTasks.push(weeklyLog);
-          }
 
-          await Promise.all([
-            store.upsertDailyStat({
-              userId: user.id,
-              dateKey,
-              totalSeconds: dailyResult.totalSeconds,
-              status: dailyResult.status,
-              error: dailyResult.error ?? null,
-              fetchedAt: new Date(dailyResult.fetchedAt)
-            }),
-            store.upsertWeeklyStat({
-              userId: user.id,
-              rangeKey: weeklyRangeKey,
-              totalSeconds: weeklyResult.totalSeconds,
-              dailyAverageSeconds: weeklyResult.dailyAverageSeconds,
-              status: weeklyResult.status,
-              error: weeklyResult.error ?? null,
-              fetchedAt: new Date(weeklyResult.fetchedAt)
-            })
-          ]);
+          await store.upsertDailyStat({
+            userId: user.id,
+            dateKey,
+            totalSeconds: dailyResult.totalSeconds,
+            status: dailyResult.status,
+            error: dailyResult.error ?? null,
+            fetchedAt: new Date(dailyResult.fetchedAt)
+          });
 
           if (logTasks.length) {
             await Promise.allSettled(logTasks);
@@ -138,10 +107,7 @@ export const createWakaTimeSync = ({
 
     try {
       const dateKey = toDateKey();
-      const [dailyResult, weeklyResult] = await Promise.all([
-        wakatime.getStatusBarToday("current", trimmedKey),
-        wakatime.getStatsRange(weeklyRangeKey, trimmedKey)
-      ]);
+      const dailyResult = await wakatime.getStatusBarToday("current", trimmedKey);
 
       const dailyLog = store.createProviderLog({
         provider: "wakatime",
@@ -155,45 +121,19 @@ export const createWakaTimeSync = ({
         fetchedAt: new Date(dailyResult.fetchedAt)
       });
 
-      const weeklyLog = store.createProviderLog({
-        provider: "wakatime",
-        userId: id,
-        endpoint: "stats",
-        rangeKey: weeklyRangeKey,
-        statusCode: weeklyResult.responseStatus ?? null,
-        ok: weeklyResult.responseOk ?? false,
-        payload: weeklyResult.payload ?? null,
-        error: weeklyResult.error ?? weeklyResult.networkError ?? null,
-        fetchedAt: new Date(weeklyResult.fetchedAt)
-      });
-
       const logTasks: Promise<void>[] = [];
       if (!dailyResult.fromCache || dailyResult.networkError) {
         logTasks.push(dailyLog);
       }
-      if (!weeklyResult.fromCache || weeklyResult.networkError) {
-        logTasks.push(weeklyLog);
-      }
 
-      await Promise.all([
-        store.upsertDailyStat({
-          userId: id,
-          dateKey,
-          totalSeconds: dailyResult.totalSeconds,
-          status: dailyResult.status,
-          error: dailyResult.error ?? null,
-          fetchedAt: new Date(dailyResult.fetchedAt)
-        }),
-        store.upsertWeeklyStat({
-          userId: id,
-          rangeKey: weeklyRangeKey,
-          totalSeconds: weeklyResult.totalSeconds,
-          dailyAverageSeconds: weeklyResult.dailyAverageSeconds,
-          status: weeklyResult.status,
-          error: weeklyResult.error ?? null,
-          fetchedAt: new Date(weeklyResult.fetchedAt)
-        })
-      ]);
+      await store.upsertDailyStat({
+        userId: id,
+        dateKey,
+        totalSeconds: dailyResult.totalSeconds,
+        status: dailyResult.status,
+        error: dailyResult.error ?? null,
+        fetchedAt: new Date(dailyResult.fetchedAt)
+      });
 
       if (logTasks.length) {
         await Promise.allSettled(logTasks);

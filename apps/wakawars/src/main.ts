@@ -5,7 +5,7 @@ import electron, {
 import electronUpdater from "electron-updater";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const {
   app,
@@ -34,6 +34,10 @@ const apiBaseReady = new Promise<string>((resolve) => {
 });
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
+const rendererURL =
+  isDev && process.env.VITE_DEV_SERVER_URL
+    ? process.env.VITE_DEV_SERVER_URL
+    : "https://wakawars.molty.cool";
 const isMacOS13OrNewer =
   process.platform === "darwin"
     ? (() => {
@@ -91,12 +95,7 @@ const createWindow = () => {
     },
   });
 
-  if (isDev && process.env.VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-  } else {
-    const indexPath = path.join(__dirname, "renderer", "index.html");
-    mainWindow.loadURL(pathToFileURL(indexPath).toString());
-  }
+  mainWindow.loadURL(rendererURL);
 
   mainWindow.on("blur", () => {
     if (!mainWindow?.webContents.isDevToolsOpened()) {

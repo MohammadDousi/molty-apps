@@ -8,7 +8,6 @@ import {
   type FormEvent,
 } from "react";
 import {
-  formatDelta,
   formatDuration,
   sliceLeaderboard,
   type LeaderboardEntry,
@@ -17,6 +16,12 @@ import {
   type WeeklyLeaderboardEntry,
   type WeeklyLeaderboardResponse,
 } from "@molty/shared";
+import {
+  buildAchievements,
+  buildQuests,
+  type Achievement,
+  type Quest,
+} from "./achievements";
 
 const logoUrl = new URL("./assets/logo.svg", import.meta.url).toString();
 const logoMaskStyle = { "--logo-mask": `url(${logoUrl})` } as CSSProperties;
@@ -56,9 +61,9 @@ const AddFriendCard = ({
   <section className={`panel add-friend-card ${docked ? "add-friend-dock" : ""}`}>
     <div className="panel-head">
       <div>
-        <p className="eyebrow">Add rival</p>
-        <h2>Invite a teammate or challenger</h2>
-        <p className="muted">Use their WakaTime username.</p>
+        <p className="eyebrow">Recruit</p>
+        <h2>Draft a rival into your arena</h2>
+        <p className="muted">Use their WakaTime username to sync stats.</p>
       </div>
       {dismissible && (
         <button
@@ -76,11 +81,11 @@ const AddFriendCard = ({
         type="text"
         value={friendInput}
         onChange={(event) => onFriendInputChange(event.target.value)}
-        placeholder="wakawars-username"
+        placeholder="rival-username"
         disabled={loading}
       />
       <button className="primary" type="submit" disabled={loading}>
-        Add
+        Recruit
       </button>
     </form>
     {errorMessage && <p className="form-error">{errorMessage}</p>}
@@ -116,13 +121,14 @@ const App = () => {
     "welcome"
   );
   const authViewInitialized = useRef(false);
-  const [showDockedAddFriend, setShowDockedAddFriend] = useState(true);
+  const [showDockedAddFriend, setShowDockedAddFriend] = useState(() => {
+    const stored = localStorage.getItem("wakawarsHideDockedAdd");
+    return stored !== "true";
+  });
   const [launchAtLogin, setLaunchAtLogin] = useState<boolean | null>(null);
   const [launchAtLoginStatus, setLaunchAtLoginStatus] = useState<string | null>(
     null
   );
-  const [updateStatus, setUpdateStatus] = useState<string | null>(null);
-  const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">(() => {
     const stored = localStorage.getItem("wakawarsTheme");
     if (stored === "light" || stored === "dark") return stored;
@@ -629,29 +635,6 @@ const App = () => {
     }
   };
 
-  const handleCheckUpdates = async () => {
-    if (!window.molty?.checkForUpdates) {
-      setUpdateStatus("Updates are available in the macOS app.");
-      return;
-    }
-
-    setCheckingUpdates(true);
-    try {
-      const result = await window.molty.checkForUpdates();
-      if (result.status === "disabled") {
-        setUpdateStatus("Updates are checked in production builds.");
-      } else if (result.status === "error") {
-        setUpdateStatus("Unable to check updates right now.");
-      } else {
-        setUpdateStatus("Checking for updates...");
-      }
-    } catch {
-      setUpdateStatus("Unable to check updates right now.");
-    } finally {
-      setCheckingUpdates(false);
-    }
-  };
-
   const handleRetry = () => {
     setError(null);
     loadSession();
@@ -691,6 +674,43 @@ const App = () => {
     });
   }, [activeEntries, config?.wakawarsUsername]);
 
+  const selfDailyEntry = useMemo(() => {
+    if (!config?.wakawarsUsername || !stats?.entries) return null;
+    return (
+      stats.entries.find(
+        (entry) => entry.username === config.wakawarsUsername
+      ) ?? null
+    );
+  }, [config?.wakawarsUsername, stats?.entries]);
+
+  const selfWeeklyEntry = useMemo(() => {
+    if (!config?.wakawarsUsername || !weeklyStats?.entries) return null;
+    return (
+      weeklyStats.entries.find(
+        (entry) => entry.username === config.wakawarsUsername
+      ) ?? null
+    );
+  }, [config?.wakawarsUsername, weeklyStats?.entries]);
+
+  const achievements = useMemo(
+    () =>
+      buildAchievements({
+        config,
+        dailyEntry: selfDailyEntry,
+        weeklyEntry: selfWeeklyEntry,
+      }),
+    [config, selfDailyEntry, selfWeeklyEntry]
+  );
+
+  const quests = useMemo(
+    () =>
+      buildQuests({
+        dailyEntry: selfDailyEntry,
+        weeklyEntry: selfWeeklyEntry,
+      }),
+    [selfDailyEntry, selfWeeklyEntry]
+  );
+
   const showNearMe = Boolean(
     leaderboardSlices?.nearMe.some(
       (entry) =>
@@ -709,17 +729,17 @@ const App = () => {
   const showSettings = Boolean(canShowSettings && activeTab === "settings");
   const passwordActionLabel = "Set password";
   const headerSubtitle = useMemo(() => {
-    if (showSettings) return "Control room";
+    if (showSettings) return "War room";
     if (showAuth) {
       if (authView === "signin") return "Sign in";
       if (authView === "signup") return "Create account";
       return "Welcome";
     }
-    return activeLeagueTab === "weekly" ? "Weekly league" : "Daily league";
+    return activeLeagueTab === "weekly" ? "Weekly clash" : "Daily arena";
   }, [showSettings, showAuth, authView, activeLeagueTab]);
   const headerStatus =
     !showAuth && !showSettings && lastUpdated
-      ? `Updated ${lastUpdated}`
+      ? `Intel ${lastUpdated}`
       : null;
 
   if (showMainLoading) {
@@ -751,8 +771,8 @@ const App = () => {
           <div className="panel-head">
             <div>
               <p className="eyebrow">Session</p>
-              <h2>Restoring your league</h2>
-              <p className="muted">Syncing your latest stats.</p>
+              <h2>Restoring your arena</h2>
+              <p className="muted">Syncing your latest battle stats.</p>
             </div>
           </div>
           <div className="loading-shimmer" aria-hidden="true" />
@@ -856,9 +876,9 @@ const App = () => {
               <div className="logo-orbit" />
             </div>
             <p className="eyebrow">WAKAWARS</p>
-            <h2>Build your focus arena</h2>
+            <h2>Forge your focus arena</h2>
             <p className="muted">
-              Compete with friends and keep your WakaTime momentum visible.
+              Battle friends, win medals, and keep your WakaTime momentum visible.
             </p>
           </div>
           <div className="hero-actions">
@@ -867,19 +887,19 @@ const App = () => {
               type="button"
               onClick={() => setAuthView("signup")}
             >
-              Create account
+              Enter arena
             </button>
             <button
               className="ghost"
               type="button"
               onClick={() => setAuthView("signin")}
             >
-              Sign in
+              Return
             </button>
           </div>
           <div className="feature-grid">
             <div className="feature-card">
-              <h3>Daily duels</h3>
+              <h3>Daily skirmishes</h3>
               <p className="muted">See who leads today in minutes, not noise.</p>
             </div>
             <div className="feature-card">
@@ -887,7 +907,7 @@ const App = () => {
               <p className="muted">Track the long game with weekly averages.</p>
             </div>
             <div className="feature-card">
-              <h3>Private by design</h3>
+              <h3>Local-first</h3>
               <p className="muted">No logins, no cloud accounts, just your data.</p>
             </div>
           </div>
@@ -897,7 +917,7 @@ const App = () => {
           <div className="panel-head">
             <div>
               <p className="eyebrow">Sign in</p>
-              <h2>Unlock this device</h2>
+              <h2>Rejoin the arena</h2>
               <p className="muted">Use your WakaWars username and password.</p>
             </div>
             {!showLogin && (
@@ -962,7 +982,7 @@ const App = () => {
           <div className="panel-head">
             <div>
               <p className="eyebrow">Create account</p>
-              <h2>Start your rivalry</h2>
+              <h2>Start your campaign</h2>
               <p className="muted">
                 Set a WakaWars username and connect your token.
               </p>
@@ -1028,9 +1048,9 @@ const App = () => {
           <section className="panel settings-panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Account</p>
-                <h2>Identity & access</h2>
-                <p className="muted">Your WakaWars profile and token status.</p>
+                <p className="eyebrow">Profile</p>
+                <h2>Player identity</h2>
+                <p className="muted">Your WakaWars badge and token status.</p>
               </div>
             </div>
             <div className="settings-list">
@@ -1048,9 +1068,9 @@ const App = () => {
           <section className="panel settings-panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Security</p>
-                <h2>Device lock</h2>
-                <p className="muted">Keep this Mac signed in.</p>
+                <p className="eyebrow">Shield</p>
+                <h2>Device shield</h2>
+                <p className="muted">Keep this Mac locked to your squad.</p>
               </div>
             </div>
             {session?.passwordSet ? (
@@ -1107,8 +1127,8 @@ const App = () => {
           <section className="panel settings-panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Privacy</p>
-                <h2>Stat visibility</h2>
+                <p className="eyebrow">Intel</p>
+                <h2>Intel visibility</h2>
                 <p className="muted">Choose who can see your stats.</p>
               </div>
             </div>
@@ -1160,7 +1180,7 @@ const App = () => {
           <section className="panel settings-panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Friends</p>
+                <p className="eyebrow">Rivals</p>
                 <h2>Rival roster</h2>
                 <p className="muted">
                   {config?.friends.length ?? 0} rivals on deck.
@@ -1184,14 +1204,14 @@ const App = () => {
                 ))}
               </div>
             ) : (
-              <p className="muted">No friends yet. Add rivals below.</p>
+              <p className="muted">No rivals yet. Recruit them below.</p>
             )}
           </section>
 
           <section className="panel settings-panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Groups</p>
+                <p className="eyebrow">Squads</p>
                 <h2>Squad lineup</h2>
                 <p className="muted">
                   {config?.groups.length ?? 0} squads saved.
@@ -1289,8 +1309,8 @@ const App = () => {
           <section className="panel settings-panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">System</p>
-                <h2>Startup & appearance</h2>
+                <p className="eyebrow">Systems</p>
+                <h2>Launch & style</h2>
                 <p className="muted">Control launch behavior and theme.</p>
               </div>
             </div>
@@ -1322,19 +1342,7 @@ const App = () => {
                   <span className="toggle-ui" />
                 </label>
               </div>
-              <div className="settings-row">
-                <span className="muted">Updates</span>
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={handleCheckUpdates}
-                  disabled={checkingUpdates}
-                >
-                  {checkingUpdates ? "Checking..." : "Check for updates"}
-                </button>
-              </div>
             </div>
-            {updateStatus && <p className="muted">{updateStatus}</p>}
             {launchAtLoginStatus === "requires-approval" && (
               <p className="muted">
                 macOS needs approval in System Settings &gt; General &gt; Login
@@ -1366,14 +1374,15 @@ const App = () => {
           <section className="panel league-panel">
             <div className="league-header">
               <div className="league-title">
-                <p className="eyebrow">League</p>
-                <h2>{activeLeagueTab === "weekly" ? "Weekly arena" : "Today's arena"}</h2>
+                <span className="ribbon">Leaderboard</span>
+                <h2>
+                  {activeLeagueTab === "weekly"
+                    ? "Weekly leaderboard"
+                    : "Daily leaderboard"}
+                </h2>
                 <div className="league-meta">
                   {activeLeagueTab === "weekly" && (
                     <span className="meta-pill">{weeklyRangeLabel}</span>
-                  )}
-                  {lastUpdated && (
-                    <span className="meta-pill">Updated {lastUpdated}</span>
                   )}
                 </div>
               </div>
@@ -1403,61 +1412,16 @@ const App = () => {
             {activeStats ? (
               activeEntries.length === 0 ? (
                 <div className="empty-state">
-                  <h3>No friends yet</h3>
+                  <h3>No rivals yet</h3>
                   <p className="muted">
-                    Add rivals to start your first league.
+                    Recruit rivals to start your first clash.
                   </p>
                 </div>
               ) : (
                 <div className="league-content">
-                  <div className="league-grid">
-                    <SummaryCard
-                      selfEntry={leaderboardSlices?.selfEntry}
-                      leaderEntry={leaderboardSlices?.leaderEntry}
-                      isWeekly={activeLeagueTab === "weekly"}
-                    />
-                    <div className="league-side">
-                      <div className="subcard">
-                        <div className="subcard-header">
-                          <h3>Podium</h3>
-                          <span className="muted">Top 3</span>
-                        </div>
-                        {leaderboardSlices?.podium.length ? (
-                          <div className="mini-list">
-                            {leaderboardSlices.podium.map((entry) => (
-                              <MiniRow
-                                key={`podium-${entry.username}`}
-                                entry={entry}
-                                isSelf={entry.username === config?.wakawarsUsername}
-                              />
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="muted">No ranked entries yet.</p>
-                        )}
-                      </div>
-                      {showNearMe ? (
-                        <div className="subcard">
-                          <div className="subcard-header">
-                            <h3>Near you</h3>
-                            <span className="muted">±1 rank</span>
-                          </div>
-                          <div className="mini-list">
-                            {leaderboardSlices.nearMe.map((entry) => (
-                              <MiniRow
-                                key={`near-${entry.username}`}
-                                entry={entry}
-                                isSelf={entry.username === config?.wakawarsUsername}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="list-section">
+                  <div className="list-section primary">
                     <div className="list-header">
-                      <h3>All players</h3>
+                      <h3>Leaderboard</h3>
                       <span className="muted">
                         {activeEntries.length} rivals
                       </span>
@@ -1480,6 +1444,46 @@ const App = () => {
                           ))}
                     </div>
                   </div>
+                  <div className="league-grid">
+                    <div className="league-side">
+                      <div className="subcard podium-card">
+                        <div className="subcard-header">
+                          <h3>Yesterday's podium</h3>
+                          <span className="muted">Top 3</span>
+                        </div>
+                        {leaderboardSlices?.podium.length ? (
+                          <div className="mini-list">
+                            {leaderboardSlices.podium.map((entry) => (
+                              <MiniRow
+                                key={`podium-${entry.username}`}
+                                entry={entry}
+                                isSelf={entry.username === config?.wakawarsUsername}
+                              />
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="muted">No ranked entries yet.</p>
+                        )}
+                      </div>
+                      {showNearMe ? (
+                        <div className="subcard">
+                          <div className="subcard-header">
+                            <h3>Nearby rivals</h3>
+                            <span className="muted">±1 rank</span>
+                          </div>
+                          <div className="mini-list">
+                            {leaderboardSlices.nearMe.map((entry) => (
+                              <MiniRow
+                                key={`near-${entry.username}`}
+                                entry={entry}
+                                isSelf={entry.username === config?.wakawarsUsername}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
                 </div>
               )
             ) : (
@@ -1490,11 +1494,34 @@ const App = () => {
               </p>
             )}
           </section>
+          <section className="panel achievement-panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Achievements</p>
+                <h2>Trophy vault</h2>
+                <p className="muted">
+                  Unlock badges by building momentum.
+                </p>
+              </div>
+            </div>
+            <QuestCard quests={quests} />
+            <div className="achievement-grid">
+              {achievements.map((achievement) => (
+                <AchievementCard
+                  key={achievement.id}
+                  achievement={achievement}
+                />
+              ))}
+            </div>
+          </section>
           {showDockedAdd && (
             <AddFriendCard
               docked
               dismissible
-              onDismiss={() => setShowDockedAddFriend(false)}
+              onDismiss={() => {
+                setShowDockedAddFriend(false);
+                localStorage.setItem("wakawarsHideDockedAdd", "true");
+              }}
               friendInput={friendInput}
               onFriendInputChange={(value) => {
                 setFriendInput(value);
@@ -1530,70 +1557,64 @@ const statusLabel = (
 };
 
 const rankDisplay = (rank: number | null) => {
-  const medal =
-    rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : null;
   return {
-    rankLabel: medal ?? (rank ? `#${rank}` : "—"),
+    rankLabel: rank ? `#${rank}` : "—",
     podiumClass: rank && rank <= 3 ? `podium podium-${rank}` : ""
   };
 };
 
 type RowEntry = LeaderboardEntry | WeeklyLeaderboardEntry;
 
-const SummaryCard = ({
-  selfEntry,
-  leaderEntry,
-  isWeekly,
-}: {
-  selfEntry?: RowEntry;
-  leaderEntry?: RowEntry;
-  isWeekly: boolean;
-}) => {
-  const { rankLabel } = rankDisplay(selfEntry?.rank ?? null);
-  const timeLabel = selfEntry
-    ? statusLabel(selfEntry.status, selfEntry.totalSeconds)
-    : "—";
-  const timeClass =
-    selfEntry?.status === "ok" ? "summary-time" : "summary-time status";
-
-  const gapSeconds =
-    selfEntry?.status === "ok" && leaderEntry?.status === "ok"
-      ? selfEntry.totalSeconds - leaderEntry.totalSeconds
-      : null;
-  const gapLabel = gapSeconds === null ? "—" : formatDelta(gapSeconds);
-  const gapTone =
-    gapSeconds === null ? "neutral" : gapSeconds >= 0 ? "positive" : "negative";
-
-  const averageLabel =
-    isWeekly && selfEntry?.status === "ok" && "dailyAverageSeconds" in selfEntry
-      ? formatDuration(selfEntry.dailyAverageSeconds)
-      : null;
-
-  return (
-    <div className="summary-card">
-      <div className="summary-header">
-        <span className="eyebrow">Your standing</span>
-        {selfEntry?.status === "ok" && <span className="summary-rank">{rankLabel}</span>}
-      </div>
-      <div className="summary-main">
-        <div className={timeClass}>{timeLabel ?? "—"}</div>
-        {selfEntry && <div className="summary-name">{selfEntry.username}</div>}
-      </div>
-      <div className="summary-meta">
-        <div className="summary-item">
-          <span className="muted">Leader gap</span>
-          <span className={`summary-value ${gapTone}`}>{gapLabel}</span>
-        </div>
-        {averageLabel && (
-          <div className="summary-item">
-            <span className="muted">Avg/day</span>
-            <span className="summary-value">{averageLabel}</span>
-          </div>
-        )}
-      </div>
+const QuestCard = ({ quests }: { quests: Quest[] }) => (
+  <div className="subcard quest-card">
+    <div className="subcard-header">
+      <h3>Battle quests</h3>
+      <span className="muted">Daily objectives</span>
     </div>
-  );
-};
+    <div className="quest-list">
+      {quests.map((quest) => (
+        <div key={quest.id} className={`quest-item ${quest.status}`}>
+          <div className="quest-copy">
+            <span className="quest-title">{quest.title}</span>
+            <span className="muted">{quest.description}</span>
+          </div>
+          <div className="quest-progress">
+            <div className="progress-track small">
+              <div
+                className="progress-fill"
+                style={{ width: `${Math.max(6, quest.progress * 100)}%` }}
+              />
+            </div>
+            <span className="achievement-meta">{quest.progressLabel}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+const AchievementCard = ({
+  achievement,
+}: {
+  achievement: Achievement;
+}) => (
+  <div className={`achievement-card ${achievement.status}`}>
+    <div className="achievement-icon">{achievement.icon}</div>
+    <div>
+      <div className="achievement-title">{achievement.title}</div>
+      <div className="achievement-desc muted">{achievement.description}</div>
+    </div>
+    <div className="achievement-progress">
+      <div className="progress-track small">
+        <div
+          className="progress-fill"
+          style={{ width: `${Math.max(6, achievement.progress * 100)}%` }}
+        />
+      </div>
+      <span className="achievement-meta">{achievement.progressLabel}</span>
+    </div>
+  </div>
+);
 
 const MiniRow = ({
   entry,
@@ -1606,11 +1627,12 @@ const MiniRow = ({
   const timeLabel = statusLabel(entry.status, entry.totalSeconds);
   const timeClass =
     entry.status === "ok" ? "mini-time" : "mini-time muted status";
+  const displayName = isSelf ? `${entry.username} (you)` : entry.username;
 
   return (
-    <div className={`mini-row ${isSelf ? "self" : ""} ${podiumClass}`}>
+    <div className={`mini-row ${podiumClass}`}>
       <span className="mini-rank">{rankLabel}</span>
-      <span className="mini-name">{entry.username}</span>
+      <span className="mini-name">{displayName}</span>
       <span className={timeClass}>{timeLabel ?? "—"}</span>
     </div>
   );

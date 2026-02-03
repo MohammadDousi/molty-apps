@@ -1,0 +1,27 @@
+{
+  "name": "@molty/wakawars-web",
+  "version": "0.1.9",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wait-on ../../packages/shared/dist/index.js && vite --port 5173",
+    "build": "vite build",
+    "preview": "vite preview --port 5173",
+    "test": "vitest run",
+    "lint": "echo \"lint not configured\""
+  },
+  "dependencies": {
+    "@molty/shared": "workspace:*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.79",
+    "@types/react-dom": "^18.2.25",
+    "@vitejs/plugin-react": "^4.3.2",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.8",
+    "vitest": "^1.6.0",
+    "wait-on": "^7.2.0"
+  }
+}

@@ -2,11 +2,11 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
-const rootDir = path.resolve(__dirname, "src/renderer");
+const rootDir = path.resolve(__dirname, "src");
 
 export default defineConfig({
   root: rootDir,
-  base: "./",
+  base: "/",
   plugins: [react()],
   resolve: {
     alias: {
@@ -14,7 +14,7 @@ export default defineConfig({
     }
   },
   build: {
-    outDir: path.resolve(__dirname, "dist/renderer"),
+    outDir: path.resolve(__dirname, "dist"),
     emptyOutDir: true
   }
 });

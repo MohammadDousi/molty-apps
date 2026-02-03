@@ -8,11 +8,7 @@
     "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
     "types": ["node", "electron"],
-    "baseUrl": ".",
-    "paths": {
-      "@molty/shared": ["../../packages/shared/dist/index.d.ts"],
-      "@molty/shared/*": ["../../packages/shared/dist/*"]
-    }
+    "baseUrl": "."
   },
   "include": ["src/main.ts", "src/preload.ts"]
 }
