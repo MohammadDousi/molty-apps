@@ -1,8 +1,11 @@
 import type { DailyStatStatus } from "@molty/shared";
+import { toDateKeyInTimeZone, toUtcDateKey } from "./date-key.js";
 
 export type WakaTimeResult = {
   status: DailyStatStatus;
   totalSeconds: number;
+  dateKey?: string;
+  timezone?: string | null;
   error?: string | null;
   fetchedAt: number;
   responseStatus?: number;
@@ -26,8 +29,16 @@ export type WakaTimeStatsResult = {
 };
 
 export type WakaTimeClient = {
-  getStatusBarToday: (username: string, apiKey: string) => Promise<WakaTimeResult>;
-  getStatsRange: (rangeKey: string, apiKey: string) => Promise<WakaTimeStatsResult>;
+  getStatusBarToday: (
+    username: string,
+    apiKey: string,
+    options?: { bypassCache?: boolean }
+  ) => Promise<WakaTimeResult>;
+  getStatsRange: (
+    rangeKey: string,
+    apiKey: string,
+    options?: { bypassCache?: boolean }
+  ) => Promise<WakaTimeStatsResult>;
 };
 
 type CacheEntry<T> = {
@@ -92,13 +103,23 @@ export const createWakaTimeClient = ({
     }
   };
 
-  const getStatusBarToday = async (username: string, apiKey: string): Promise<WakaTimeResult> => {
+  const getStatusBarToday = async (
+    username: string,
+    apiKey: string,
+    options?: { bypassCache?: boolean }
+  ): Promise<WakaTimeResult> => {
     const cacheKey = `${username}:${apiKey}`;
-    const dateKey = new Date().toISOString().slice(0, 10);
     const cached = statusCache.get(cacheKey);
     const now = Date.now();
+    const fallbackTimezone = cached?.result.timezone ?? null;
+    const fallbackDateKey = toDateKeyInTimeZone(new Date(), fallbackTimezone);
 
-    if (cached && cached.dateKey === dateKey && now - cached.fetchedAt < ttlMs) {
+    if (
+      !options?.bypassCache &&
+      cached &&
+      cached.dateKey === fallbackDateKey &&
+      now - cached.fetchedAt < ttlMs
+    ) {
       return { ...cached.result, fromCache: true };
     }
 
@@ -122,13 +143,19 @@ export const createWakaTimeClient = ({
         const result: WakaTimeResult = {
           status: "private",
           totalSeconds: 0,
+          dateKey: fallbackDateKey,
+          timezone: fallbackTimezone,
           error: errorMessage || "User data is private or unauthorized",
           fetchedAt: now,
           responseStatus,
           responseOk,
           payload
         };
-        statusCache.set(cacheKey, { dateKey, fetchedAt: now, result });
+        statusCache.set(cacheKey, {
+          dateKey: result.dateKey ?? fallbackDateKey,
+          fetchedAt: now,
+          result
+        });
         return result;
       }
 
@@ -142,6 +169,8 @@ export const createWakaTimeClient = ({
         const result: WakaTimeResult = {
           status: isPrivate ? "private" : "not_found",
           totalSeconds: 0,
+          dateKey: fallbackDateKey,
+          timezone: fallbackTimezone,
           error:
             errorMessage ||
             (isPrivate ? "User data is private or unauthorized" : "User not found"),
@@ -150,7 +179,11 @@ export const createWakaTimeClient = ({
           responseOk,
           payload
         };
-        statusCache.set(cacheKey, { dateKey, fetchedAt: now, result });
+        statusCache.set(cacheKey, {
+          dateKey: result.dateKey ?? fallbackDateKey,
+          fetchedAt: now,
+          result
+        });
         return result;
       }
 
@@ -159,25 +192,45 @@ export const createWakaTimeClient = ({
         const result: WakaTimeResult = {
           status: "error",
           totalSeconds: 0,
+          dateKey: fallbackDateKey,
+          timezone: fallbackTimezone,
           error: errorMessage || `Unexpected response (${response.status})`,
           fetchedAt: now,
           responseStatus,
           responseOk,
           payload
         };
-        statusCache.set(cacheKey, { dateKey, fetchedAt: now, result });
+        statusCache.set(cacheKey, {
+          dateKey: result.dateKey ?? fallbackDateKey,
+          fetchedAt: now,
+          result
+        });
         return result;
       }
 
       const dataPayload = isJson
         ? (payload as {
-            data?: { grand_total?: { total_seconds?: number } };
+            data?: {
+              grand_total?: { total_seconds?: number };
+              range?: { date?: string; timezone?: string };
+            };
           })
         : null;
       const totalSeconds = dataPayload?.data?.grand_total?.total_seconds ?? 0;
+      const range = dataPayload?.data?.range;
+      const timezone =
+        typeof range?.timezone === "string" && range.timezone.trim()
+          ? range.timezone.trim()
+          : null;
+      const dateKey =
+        typeof range?.date === "string" && range.date
+          ? range.date
+          : toDateKeyInTimeZone(new Date(), timezone);
       const result: WakaTimeResult = {
         status: "ok",
         totalSeconds,
+        dateKey,
+        timezone,
         fetchedAt: now,
         responseStatus,
         responseOk,
@@ -191,6 +244,8 @@ export const createWakaTimeClient = ({
       const fallback = cached?.result ?? {
         status: "error",
         totalSeconds: 0,
+        dateKey: fallbackDateKey,
+        timezone: fallbackTimezone,
         error: networkError,
         fetchedAt: now,
         responseStatus: undefined,
@@ -200,6 +255,8 @@ export const createWakaTimeClient = ({
 
       return {
         ...fallback,
+        dateKey: fallback.dateKey ?? fallbackDateKey,
+        timezone: fallback.timezone ?? fallbackTimezone,
         fetchedAt: cached?.fetchedAt ?? now,
         fromCache: Boolean(cached),
         networkError: Boolean(cached) ? networkError : null
@@ -207,13 +264,22 @@ export const createWakaTimeClient = ({
     }
   };
 
-  const getStatsRange = async (rangeKey: string, apiKey: string): Promise<WakaTimeStatsResult> => {
+  const getStatsRange = async (
+    rangeKey: string,
+    apiKey: string,
+    options?: { bypassCache?: boolean }
+  ): Promise<WakaTimeStatsResult> => {
     const cacheKey = `stats:${rangeKey}:${apiKey}`;
-    const dateKey = new Date().toISOString().slice(0, 10);
+    const dateKey = toUtcDateKey();
     const cached = statsCache.get(cacheKey);
     const now = Date.now();
 
-    if (cached && cached.dateKey === dateKey && now - cached.fetchedAt < ttlMs) {
+    if (
+      !options?.bypassCache &&
+      cached &&
+      cached.dateKey === dateKey &&
+      now - cached.fetchedAt < ttlMs
+    ) {
       return { ...cached.result, fromCache: true };
     }
 
@@ -302,10 +368,23 @@ export const createWakaTimeClient = ({
       }
 
       const dataPayload = isJson
-        ? (payload as { data?: { total_seconds?: number; daily_average?: number } })
+        ? (payload as {
+            data?: {
+              total_seconds?: number;
+              total_seconds_including_other_language?: number;
+              daily_average?: number;
+              daily_average_including_other_language?: number;
+            };
+          })
         : null;
-      const totalSeconds = dataPayload?.data?.total_seconds ?? 0;
-      const dailyAverageSeconds = dataPayload?.data?.daily_average ?? 0;
+      const totalSeconds =
+        dataPayload?.data?.total_seconds_including_other_language ??
+        dataPayload?.data?.total_seconds ??
+        0;
+      const dailyAverageSeconds =
+        dataPayload?.data?.daily_average_including_other_language ??
+        dataPayload?.data?.daily_average ??
+        0;
       const result: WakaTimeStatsResult = {
         status: "ok",
         totalSeconds,

@@ -1,8 +1,14 @@
 import type { UserRepository } from "./repository.js";
 import type { WakaTimeClient } from "./wakatime.js";
+import { toDateKeyInTimeZone } from "./date-key.js";
+import {
+  DEFAULT_WAKATIME_BATCH_DELAY_MS,
+  DEFAULT_WAKATIME_BATCH_SIZE,
+  runInBatches
+} from "./wakatime-rate-limit.js";
 export { DEFAULT_WAKATIME_WEEKLY_RANGE } from "./wakatime-weekly-cache.js";
 
-export const DEFAULT_WAKATIME_SYNC_INTERVAL_MS = 15 * 60 * 1000;
+export const DEFAULT_WAKATIME_SYNC_INTERVAL_MS = 2 * 60 * 1000;
 
 export type WakaTimeSyncOptions = {
   store: UserRepository;
@@ -15,10 +21,13 @@ export type WakaTimeSync = {
   start: () => void;
   stop: () => void;
   runOnce: () => Promise<void>;
-  syncUser: (input: { id: number; apiKey: string }) => Promise<void>;
+  syncUser: (input: {
+    id: number;
+    apiKey: string;
+    wakatimeTimezone?: string | null;
+    bypassCache?: boolean;
+  }) => Promise<void>;
 };
-
-const toDateKey = (date: Date = new Date()) => date.toISOString().slice(0, 10);
 
 export const createWakaTimeSync = ({
   store,
@@ -39,21 +48,40 @@ export const createWakaTimeSync = ({
     console.error("[wakawars] WakaTime sync failed", error);
   };
 
+  const resolveDateKey = (input: {
+    dateKey?: string;
+    timeZone?: string | null;
+  }) => {
+    if (input.dateKey) {
+      return input.dateKey;
+    }
+
+    return toDateKeyInTimeZone(new Date(), input.timeZone ?? null);
+  };
+
   const runOnce = async () => {
     if (running) return;
     running = true;
 
     try {
       const users = await store.listUsers();
-      const dateKey = toDateKey();
-      const tasks = users
+      const targets = users
         .map((user) => ({
           ...user,
           apiKey: user.apiKey.trim()
         }))
-        .filter((user) => Boolean(user.apiKey))
-        .map(async (user) => {
+        .filter((user) => Boolean(user.apiKey));
+
+      await runInBatches(
+        targets,
+        async (user) => {
           const dailyResult = await wakatime.getStatusBarToday("current", user.apiKey);
+          const resolvedTimezone =
+            dailyResult.timezone ?? user.wakatimeTimezone ?? null;
+          const dateKey = resolveDateKey({
+            dateKey: dailyResult.dateKey,
+            timeZone: resolvedTimezone
+          });
 
           const dailyLog = store.createProviderLog({
             provider: "wakatime",
@@ -68,30 +96,34 @@ export const createWakaTimeSync = ({
           });
 
           const logTasks: Promise<void>[] = [];
+          if (dailyResult.timezone && dailyResult.timezone !== user.wakatimeTimezone) {
+            logTasks.push(store.setWakaTimeTimezone(user.id, dailyResult.timezone));
+          }
           if (!dailyResult.fromCache || dailyResult.networkError) {
             logTasks.push(dailyLog);
           }
 
-          await store.upsertDailyStat({
-            userId: user.id,
-            dateKey,
-            totalSeconds: dailyResult.totalSeconds,
-            status: dailyResult.status,
-            error: dailyResult.error ?? null,
-            fetchedAt: new Date(dailyResult.fetchedAt)
-          });
+          if (!dailyResult.fromCache) {
+            await store.upsertDailyStat({
+              userId: user.id,
+              dateKey,
+              totalSeconds: dailyResult.totalSeconds,
+              status: dailyResult.status,
+              error: dailyResult.error ?? null,
+              fetchedAt: new Date(dailyResult.fetchedAt)
+            });
+          }
 
           if (logTasks.length) {
             await Promise.allSettled(logTasks);
           }
-        });
-
-      const results = await Promise.allSettled(tasks);
-      results.forEach((result) => {
-        if (result.status === "rejected") {
-          reportError(result.reason);
+        },
+        {
+          batchSize: DEFAULT_WAKATIME_BATCH_SIZE,
+          delayMs: DEFAULT_WAKATIME_BATCH_DELAY_MS,
+          onError: reportError
         }
-      });
+      );
     } catch (error) {
       reportError(error);
     } finally {
@@ -99,15 +131,31 @@ export const createWakaTimeSync = ({
     }
   };
 
-  const syncUser = async ({ id, apiKey }: { id: number; apiKey: string }) => {
+  const syncUser = async ({
+    id,
+    apiKey,
+    wakatimeTimezone,
+    bypassCache = false
+  }: {
+    id: number;
+    apiKey: string;
+    wakatimeTimezone?: string | null;
+    bypassCache?: boolean;
+  }) => {
     const trimmedKey = apiKey.trim();
     if (!trimmedKey) {
       return;
     }
 
     try {
-      const dateKey = toDateKey();
-      const dailyResult = await wakatime.getStatusBarToday("current", trimmedKey);
+      const dailyResult = await wakatime.getStatusBarToday("current", trimmedKey, {
+        bypassCache
+      });
+      const resolvedTimezone = dailyResult.timezone ?? wakatimeTimezone ?? null;
+      const dateKey = resolveDateKey({
+        dateKey: dailyResult.dateKey,
+        timeZone: resolvedTimezone
+      });
 
       const dailyLog = store.createProviderLog({
         provider: "wakatime",
@@ -122,18 +170,23 @@ export const createWakaTimeSync = ({
       });
 
       const logTasks: Promise<void>[] = [];
+      if (dailyResult.timezone && dailyResult.timezone !== wakatimeTimezone) {
+        logTasks.push(store.setWakaTimeTimezone(id, dailyResult.timezone));
+      }
       if (!dailyResult.fromCache || dailyResult.networkError) {
         logTasks.push(dailyLog);
       }
 
-      await store.upsertDailyStat({
-        userId: id,
-        dateKey,
-        totalSeconds: dailyResult.totalSeconds,
-        status: dailyResult.status,
-        error: dailyResult.error ?? null,
-        fetchedAt: new Date(dailyResult.fetchedAt)
-      });
+      if (!dailyResult.fromCache) {
+        await store.upsertDailyStat({
+          userId: id,
+          dateKey,
+          totalSeconds: dailyResult.totalSeconds,
+          status: dailyResult.status,
+          error: dailyResult.error ?? null,
+          fetchedAt: new Date(dailyResult.fetchedAt)
+        });
+      }
 
       if (logTasks.length) {
         await Promise.allSettled(logTasks);

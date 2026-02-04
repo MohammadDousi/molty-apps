@@ -1,5 +1,10 @@
 import type { UserRepository } from "./repository.js";
 import type { WakaTimeClient, WakaTimeStatsResult } from "./wakatime.js";
+import {
+  DEFAULT_WAKATIME_BATCH_DELAY_MS,
+  DEFAULT_WAKATIME_BATCH_SIZE,
+  runInBatches
+} from "./wakatime-rate-limit.js";
 
 export const DEFAULT_WAKATIME_WEEKLY_RANGE = "last_7_days";
 export const DEFAULT_WAKATIME_WEEKLY_CACHE_INTERVAL_MS = 30 * 60 * 1000;
@@ -74,23 +79,25 @@ export const createWakaTimeWeeklyCache = ({
 
     try {
       const users = await store.listUsers();
-      const tasks = users
+      const targets = users
         .map((user) => ({
           ...user,
           apiKey: user.apiKey.trim()
         }))
-        .filter((user) => Boolean(user.apiKey))
-        .map(async (user) => {
+        .filter((user) => Boolean(user.apiKey));
+
+      await runInBatches(
+        targets,
+        async (user) => {
           const weeklyResult = await wakatime.getStatsRange(weeklyRangeKey, user.apiKey);
           setEntry(user.id, weeklyRangeKey, weeklyResult);
-        });
-
-      const results = await Promise.allSettled(tasks);
-      results.forEach((result) => {
-        if (result.status === "rejected") {
-          reportError(result.reason);
+        },
+        {
+          batchSize: DEFAULT_WAKATIME_BATCH_SIZE,
+          delayMs: DEFAULT_WAKATIME_BATCH_DELAY_MS,
+          onError: reportError
         }
-      });
+      );
     } catch (error) {
       reportError(error);
     } finally {

@@ -25,6 +25,7 @@ export type UserConfig = {
   id: number;
   wakawarsUsername: string;
   apiKey: string;
+  wakatimeTimezone?: string | null;
   friends: Friend[];
   groups: Group[];
   statsVisibility: StatsVisibility;

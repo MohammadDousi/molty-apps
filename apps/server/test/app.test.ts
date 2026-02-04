@@ -71,7 +71,8 @@ const createMemoryRepository = (): UserRepository => {
       users.map((user) => ({
         id: user.id,
         wakawarsUsername: user.wakawarsUsername,
-        apiKey: user.apiKey
+        apiKey: user.apiKey,
+        wakatimeTimezone: user.wakatimeTimezone ?? null
       })),
     getUsersByIds: async (userIds) =>
       users
@@ -79,7 +80,8 @@ const createMemoryRepository = (): UserRepository => {
         .map((user) => ({
           id: user.id,
           wakawarsUsername: user.wakawarsUsername,
-          statsVisibility: user.statsVisibility
+          statsVisibility: user.statsVisibility,
+          wakatimeTimezone: user.wakatimeTimezone ?? null
         })),
     getUserById: async (userId) => {
       const user = findUser((entry) => entry.id === userId);
@@ -94,6 +96,7 @@ const createMemoryRepository = (): UserRepository => {
         id: nextId++,
         wakawarsUsername,
         apiKey,
+        wakatimeTimezone: null,
         passwordHash: null,
         statsVisibility: "everyone"
       };
@@ -103,6 +106,13 @@ const createMemoryRepository = (): UserRepository => {
     updateUser: async (userId, { wakawarsUsername, apiKey }) => {
       users = users.map((user) =>
         user.id === userId ? { ...user, wakawarsUsername, apiKey } : user
+      );
+      const updated = findUser((entry) => entry.id === userId);
+      return withRelations(updated!);
+    },
+    setWakaTimeTimezone: async (userId, timeZone) => {
+      users = users.map((user) =>
+        user.id === userId ? { ...user, wakatimeTimezone: timeZone } : user
       );
       const updated = findUser((entry) => entry.id === userId);
       return withRelations(updated!);
@@ -178,6 +188,28 @@ const createMemoryRepository = (): UserRepository => {
       friendships
         .filter((entry) => entry.friendId === userId && candidateIds.includes(entry.userId))
         .map((entry) => entry.userId),
+    getGroupPeerIds: async (userId) => {
+      const groupIds = new Set<number>();
+      groups
+        .filter((group) => group.ownerId === userId)
+        .forEach((group) => groupIds.add(group.id));
+      groupMembers
+        .filter((member) => member.userId === userId)
+        .forEach((member) => groupIds.add(member.groupId));
+
+      const peerIds = new Set<number>();
+      groupIds.forEach((groupId) => {
+        const group = groups.find((entry) => entry.id === groupId);
+        if (group) {
+          peerIds.add(group.ownerId);
+        }
+        groupMembers
+          .filter((member) => member.groupId === groupId)
+          .forEach((member) => peerIds.add(member.userId));
+      });
+      peerIds.delete(userId);
+      return Array.from(peerIds);
+    },
     getGroupOwnerIdsForMember: async (memberId, ownerIds) =>
       groups
         .filter((group) => ownerIds.includes(group.ownerId))
@@ -402,8 +434,135 @@ describe("server app", () => {
     expect(statsPayload.entries.map((entry) => entry.username)).toEqual(["amy", "ben", "mo"]);
   });
 
+  it("includes group members in leaderboards for all members", async () => {
+    const repository = createMemoryRepository();
+    const { app, store } = createServer({
+      port: 0,
+      repository,
+      enableStatusSync: false
+    });
+
+    const { sessionId: moSession } = await getSessionId(
+      await app.handle(
+        new Request("http://localhost/wakawars/v0/config", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            wakawarsUsername: "mo",
+            apiKey: "key"
+          })
+        })
+      )
+    );
+
+    const { sessionId: amySession } = await getSessionId(
+      await app.handle(
+        new Request("http://localhost/wakawars/v0/config", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            wakawarsUsername: "amy",
+            apiKey: "key"
+          })
+        })
+      )
+    );
+
+    await getSessionId(
+      await app.handle(
+        new Request("http://localhost/wakawars/v0/config", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            wakawarsUsername: "ben",
+            apiKey: "key"
+          })
+        })
+      )
+    );
+
+    const groupResponse = await app.handle(
+      new Request("http://localhost/wakawars/v0/groups", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-wakawars-session": moSession ?? ""
+        },
+        body: JSON.stringify({ name: "Alpha" })
+      })
+    );
+    const groupPayload = (await groupResponse.json()) as {
+      groups: Array<{ id: number }>;
+    };
+    const groupId = groupPayload.groups[0]?.id;
+    expect(groupId).toBeTruthy();
+
+    await app.handle(
+      new Request(`http://localhost/wakawars/v0/groups/${groupId}/members`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-wakawars-session": moSession ?? ""
+        },
+        body: JSON.stringify({ username: "amy" })
+      })
+    );
+
+    await app.handle(
+      new Request(`http://localhost/wakawars/v0/groups/${groupId}/members`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-wakawars-session": moSession ?? ""
+        },
+        body: JSON.stringify({ username: "ben" })
+      })
+    );
+
+    const dateKey = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const mo = await store.getUserByUsername("mo");
+    const amy = await store.getUserByUsername("amy");
+    const ben = await store.getUserByUsername("ben");
+    await store.upsertDailyStat({
+      userId: mo!.id,
+      dateKey,
+      totalSeconds: 3600,
+      status: "ok",
+      error: null,
+      fetchedAt: now
+    });
+    await store.upsertDailyStat({
+      userId: amy!.id,
+      dateKey,
+      totalSeconds: 900,
+      status: "ok",
+      error: null,
+      fetchedAt: now
+    });
+    await store.upsertDailyStat({
+      userId: ben!.id,
+      dateKey,
+      totalSeconds: 1800,
+      status: "ok",
+      error: null,
+      fetchedAt: now
+    });
+
+    const statsResponse = await app.handle(
+      new Request("http://localhost/wakawars/v0/stats/today", {
+        headers: { "x-wakawars-session": amySession ?? "" }
+      })
+    );
+    const statsPayload = (await statsResponse.json()) as { entries: Array<{ username: string }> };
+    const usernames = statsPayload.entries.map((entry) => entry.username).sort();
+    expect(usernames).toEqual(["amy", "ben", "mo"]);
+  });
+
   it("returns weekly leaderboard stats sorted by total time", async () => {
     const repository = createMemoryRepository();
+    const otherOffset = 600;
+    const dailyAverageOffset = 60;
     const weeklyStatsByKey = new Map([
       ["key-mo", { totalSeconds: 7200, dailyAverageSeconds: 1028 }],
       ["key-amy", { totalSeconds: 14400, dailyAverageSeconds: 2057 }],
@@ -428,7 +587,9 @@ describe("server app", () => {
         JSON.stringify({
           data: {
             total_seconds: stat.totalSeconds,
-            daily_average: stat.dailyAverageSeconds
+            total_seconds_including_other_language: stat.totalSeconds + otherOffset,
+            daily_average: stat.dailyAverageSeconds,
+            daily_average_including_other_language: stat.dailyAverageSeconds + dailyAverageOffset
           }
         }),
         {
@@ -508,8 +669,21 @@ describe("server app", () => {
         headers: { "x-wakawars-session": sessionId ?? "" }
       })
     );
-    const statsPayload = (await statsResponse.json()) as { entries: Array<{ username: string }> };
+    const statsPayload = (await statsResponse.json()) as {
+      entries: Array<{
+        username: string;
+        totalSeconds: number;
+        dailyAverageSeconds: number;
+      }>;
+    };
     expect(statsPayload.entries.map((entry) => entry.username)).toEqual(["amy", "mo", "ben"]);
+    const amyEntry = statsPayload.entries.find((entry) => entry.username === "amy");
+    expect(amyEntry?.totalSeconds).toBe(
+      weeklyStatsByKey.get("key-amy")!.totalSeconds + otherOffset
+    );
+    expect(amyEntry?.dailyAverageSeconds).toBe(
+      weeklyStatsByKey.get("key-amy")!.dailyAverageSeconds + dailyAverageOffset
+    );
   });
 
   it("rejects unknown friends", async () => {

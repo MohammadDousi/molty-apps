@@ -34,10 +34,24 @@ export type ProviderLogRecord = {
 
 export type UserRepository = {
   countUsers: () => Promise<number>;
-  listUsers: () => Promise<Array<{ id: number; wakawarsUsername: string; apiKey: string }>>;
+  listUsers: () => Promise<
+    Array<{
+      id: number;
+      wakawarsUsername: string;
+      apiKey: string;
+      wakatimeTimezone?: string | null;
+    }>
+  >;
   getUsersByIds: (
     userIds: number[]
-  ) => Promise<Array<{ id: number; wakawarsUsername: string; statsVisibility: StatsVisibility }>>;
+  ) => Promise<
+    Array<{
+      id: number;
+      wakawarsUsername: string;
+      statsVisibility: StatsVisibility;
+      wakatimeTimezone?: string | null;
+    }>
+  >;
   getUserById: (userId: number) => Promise<UserConfig | null>;
   getUserByUsername: (username: string) => Promise<UserConfig | null>;
   createUser: (config: { wakawarsUsername: string; apiKey: string }) => Promise<UserConfig>;
@@ -45,6 +59,7 @@ export type UserRepository = {
     userId: number,
     config: { wakawarsUsername: string; apiKey: string }
   ) => Promise<UserConfig>;
+  setWakaTimeTimezone: (userId: number, timeZone: string) => Promise<UserConfig>;
   setPassword: (userId: number, passwordHash: string | null) => Promise<UserConfig>;
   setStatsVisibility: (userId: number, visibility: StatsVisibility) => Promise<UserConfig>;
   addFriendship: (userId: number, friendId: number) => Promise<UserConfig>;
@@ -54,6 +69,7 @@ export type UserRepository = {
   addGroupMember: (userId: number, groupId: number, memberId: number) => Promise<UserConfig>;
   removeGroupMember: (userId: number, groupId: number, memberId: number) => Promise<UserConfig>;
   getIncomingFriendIds: (userId: number, candidateIds: number[]) => Promise<number[]>;
+  getGroupPeerIds: (userId: number) => Promise<number[]>;
   getGroupOwnerIdsForMember: (
     memberId: number,
     ownerIds: number[]
@@ -94,6 +110,7 @@ type PrismaUser = {
   id: number;
   wakawars_username: string;
   api_key: string;
+  wakatime_timezone: string | null;
   password_hash: string | null;
   stats_visibility: StatsVisibility;
   friendships: Array<{
@@ -121,6 +138,7 @@ const mapUserToConfig = (user: PrismaUser): UserConfig => ({
   id: user.id,
   wakawarsUsername: user.wakawars_username,
   apiKey: user.api_key,
+  wakatimeTimezone: user.wakatime_timezone ?? null,
   statsVisibility: user.stats_visibility,
   passwordHash: user.password_hash,
   friends: user.friendships.map((friendship) => ({
@@ -160,13 +178,19 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
 
   const listUsers = async () => {
     const users = await prisma.ww_user.findMany({
-      select: { id: true, wakawars_username: true, api_key: true }
+      select: {
+        id: true,
+        wakawars_username: true,
+        api_key: true,
+        wakatime_timezone: true
+      }
     });
 
     return users.map((user) => ({
       id: user.id,
       wakawarsUsername: user.wakawars_username,
-      apiKey: user.api_key
+      apiKey: user.api_key,
+      wakatimeTimezone: user.wakatime_timezone ?? null
     }));
   };
 
@@ -175,13 +199,19 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
 
     const users = await prisma.ww_user.findMany({
       where: { id: { in: userIds } },
-      select: { id: true, wakawars_username: true, stats_visibility: true }
+      select: {
+        id: true,
+        wakawars_username: true,
+        stats_visibility: true,
+        wakatime_timezone: true
+      }
     });
 
     return users.map((user) => ({
       id: user.id,
       wakawarsUsername: user.wakawars_username,
-      statsVisibility: user.stats_visibility as StatsVisibility
+      statsVisibility: user.stats_visibility as StatsVisibility,
+      wakatimeTimezone: user.wakatime_timezone ?? null
     }));
   };
 
@@ -242,6 +272,16 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     const user = await prisma.ww_user.update({
       where: { id: userId },
       data: { wakawars_username: wakawarsUsername, api_key: apiKey },
+      include: userInclude
+    });
+
+    return mapUserToConfig(user as PrismaUser);
+  };
+
+  const setWakaTimeTimezone = async (userId: number, timeZone: string) => {
+    const user = await prisma.ww_user.update({
+      where: { id: userId },
+      data: { wakatime_timezone: timeZone },
       include: userInclude
     });
 
@@ -419,6 +459,29 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     });
 
     return rows.map((row) => row.user_id);
+  };
+
+  const getGroupPeerIds = async (userId: number) => {
+    const groups = await prisma.ww_group.findMany({
+      where: {
+        OR: [
+          { owner_id: userId },
+          { members: { some: { user_id: userId } } }
+        ]
+      },
+      select: {
+        owner_id: true,
+        members: { select: { user_id: true } }
+      }
+    });
+
+    const ids = new Set<number>();
+    groups.forEach((group) => {
+      ids.add(group.owner_id);
+      group.members.forEach((member) => ids.add(member.user_id));
+    });
+    ids.delete(userId);
+    return Array.from(ids);
   };
 
   const getGroupOwnerIdsForMember = async (memberId: number, ownerIds: number[]) => {
@@ -657,6 +720,7 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     getUserByUsername,
     createUser,
     updateUser,
+    setWakaTimeTimezone,
     setPassword,
     setStatsVisibility,
     addFriendship,
@@ -666,6 +730,7 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     addGroupMember,
     removeGroupMember,
     getIncomingFriendIds,
+    getGroupPeerIds,
     getGroupOwnerIdsForMember,
     searchUsers,
     upsertDailyStat,

@@ -334,6 +334,10 @@ h3 {
   gap: 2px;
 }
 
+.league-title h2 span {
+  display: block;
+}
+
 .league-meta {
   display: flex;
   flex-wrap: wrap;

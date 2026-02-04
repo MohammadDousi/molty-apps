@@ -58,7 +58,9 @@ const AddFriendCard = ({
   loading,
   errorMessage,
 }: AddFriendCardProps) => (
-  <section className={`panel add-friend-card ${docked ? "add-friend-dock" : ""}`}>
+  <section
+    className={`panel add-friend-card ${docked ? "add-friend-dock" : ""}`}
+  >
     <div className="panel-head">
       <div>
         <p className="eyebrow">Recruit</p>
@@ -96,9 +98,12 @@ const App = () => {
   const [apiBase, setApiBase] = useState<string | null>(null);
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [stats, setStats] = useState<LeaderboardResponse | null>(null);
+  const [yesterdayStats, setYesterdayStats] =
+    useState<LeaderboardResponse | null>(null);
   const [weeklyStats, setWeeklyStats] =
     useState<WeeklyLeaderboardResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(() =>
     localStorage.getItem("wakawarsSession")
@@ -114,9 +119,9 @@ const App = () => {
     Record<number, string>
   >({});
   const [activeTab, setActiveTab] = useState<"league" | "settings">("league");
-  const [activeLeagueTab, setActiveLeagueTab] = useState<
-    "today" | "weekly"
-  >("today");
+  const [activeLeagueTab, setActiveLeagueTab] = useState<"today" | "weekly">(
+    "today"
+  );
   const [authView, setAuthView] = useState<"welcome" | "signin" | "signup">(
     "welcome"
   );
@@ -217,7 +222,10 @@ const App = () => {
       try {
         const tasks: Array<
           Promise<LeaderboardResponse | WeeklyLeaderboardResponse>
-        > = [request<LeaderboardResponse>("/stats/today")];
+        > = [
+          request<LeaderboardResponse>("/stats/today"),
+          request<LeaderboardResponse>("/stats/yesterday"),
+        ];
 
         if (includeWeekly) {
           tasks.push(request<WeeklyLeaderboardResponse>("/stats/weekly"));
@@ -236,8 +244,13 @@ const App = () => {
               : "Failed to load stats";
         }
 
+        const yesterdayResult = results[1];
+        if (yesterdayResult?.status === "fulfilled") {
+          setYesterdayStats(yesterdayResult.value as LeaderboardResponse);
+        }
+
         if (includeWeekly) {
-          const weeklyResult = results[1];
+          const weeklyResult = results[2];
           if (weeklyResult?.status === "fulfilled") {
             setWeeklyStats(weeklyResult.value as WeeklyLeaderboardResponse);
           } else if (weeklyResult?.status === "rejected") {
@@ -589,18 +602,15 @@ const App = () => {
     }
   };
 
-  const handleRemoveGroupMember = async (
-    groupId: number,
-    username: string
-  ) => {
+  const handleRemoveGroupMember = async (groupId: number, username: string) => {
     if (!groupId || !username) return;
 
     setLoading(true);
     try {
       const payload = await request<PublicConfig>(
-        `/groups/${encodeURIComponent(String(groupId))}/members/${encodeURIComponent(
-          username
-        )}`,
+        `/groups/${encodeURIComponent(
+          String(groupId)
+        )}/members/${encodeURIComponent(username)}`,
         { method: "DELETE" }
       );
       setConfig(payload);
@@ -615,7 +625,9 @@ const App = () => {
     }
   };
 
-  const handleVisibilityChange = async (value: PublicConfig["statsVisibility"]) => {
+  const handleVisibilityChange = async (
+    value: PublicConfig["statsVisibility"]
+  ) => {
     if (!config || config.statsVisibility === value) return;
 
     setLoading(true);
@@ -640,6 +652,20 @@ const App = () => {
     loadSession();
     loadConfig();
     loadStats({ silent: true, includeWeekly: shouldIncludeWeekly });
+  };
+
+  const handleRefresh = async () => {
+    if (!isConfigured || !isAuthenticated || refreshing) return;
+    setRefreshing(true);
+    try {
+      await request<LeaderboardResponse>("/stats/refresh", { method: "POST" });
+      await loadStats({ silent: true, includeWeekly: shouldIncludeWeekly });
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to refresh stats");
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const lastUpdated = useMemo(() => {
@@ -673,6 +699,15 @@ const App = () => {
       aroundCount: 1,
     });
   }, [activeEntries, config?.wakawarsUsername]);
+
+  const yesterdayPodium = useMemo(() => {
+    if (!config?.wakawarsUsername || !yesterdayStats?.entries?.length) {
+      return [];
+    }
+    return sliceLeaderboard(yesterdayStats.entries, config.wakawarsUsername, {
+      podiumCount: 3,
+    }).podium;
+  }, [config?.wakawarsUsername, yesterdayStats?.entries]);
 
   const selfDailyEntry = useMemo(() => {
     if (!config?.wakawarsUsername || !stats?.entries) return null;
@@ -737,27 +772,30 @@ const App = () => {
     }
     return activeLeagueTab === "weekly" ? "Weekly clash" : "Daily arena";
   }, [showSettings, showAuth, authView, activeLeagueTab]);
-  const headerStatus =
-    !showAuth && !showSettings && lastUpdated
-      ? `Intel ${lastUpdated}`
-      : null;
+  const canRefresh =
+    !showAuth && !showSettings && isConfigured && isAuthenticated;
 
   if (showMainLoading) {
     return (
       <div className="app">
         <header className="header">
           <div className="app-brand">
-            <span className="app-brand-icon" role="img" aria-label="WakaWars logo">
-              <span className="app-brand-mark logo-mask" style={logoMaskStyle} />
+            <span
+              className="app-brand-icon"
+              role="img"
+              aria-label="WakaWars logo"
+            >
+              <span
+                className="app-brand-mark logo-mask"
+                style={logoMaskStyle}
+              />
             </span>
             <div className="brand-copy">
               <span className="brand-title">WakaWars</span>
               <span className="brand-sub">{headerSubtitle}</span>
             </div>
           </div>
-          <div className="header-meta">
-            {headerStatus && <span className="status-pill">{headerStatus}</span>}
-          </div>
+          <div className="header-meta" />
         </header>
         {error && (
           <div className="error">
@@ -786,17 +824,22 @@ const App = () => {
       <div className="app">
         <header className="header">
           <div className="app-brand">
-            <span className="app-brand-icon" role="img" aria-label="WakaWars logo">
-              <span className="app-brand-mark logo-mask" style={logoMaskStyle} />
+            <span
+              className="app-brand-icon"
+              role="img"
+              aria-label="WakaWars logo"
+            >
+              <span
+                className="app-brand-mark logo-mask"
+                style={logoMaskStyle}
+              />
             </span>
             <div className="brand-copy">
               <span className="brand-title">WakaWars</span>
               <span className="brand-sub">{headerSubtitle}</span>
             </div>
           </div>
-          <div className="header-meta">
-            {headerStatus && <span className="status-pill">{headerStatus}</span>}
-          </div>
+          <div className="header-meta" />
         </header>
         <section className="panel">
           <div className="panel-head">
@@ -826,7 +869,10 @@ const App = () => {
               role="img"
               aria-label="WakaWars logo"
             >
-              <span className="app-brand-mark logo-mask" style={logoMaskStyle} />
+              <span
+                className="app-brand-mark logo-mask"
+                style={logoMaskStyle}
+              />
             </span>
             <div className="brand-copy">
               <span className="brand-title">WakaWars</span>
@@ -834,7 +880,17 @@ const App = () => {
             </div>
           </div>
           <div className="header-meta">
-            {headerStatus && <span className="status-pill">{headerStatus}</span>}
+            {canRefresh && (
+              <button
+                type="button"
+                className="icon-button ghost-button"
+                onClick={handleRefresh}
+                disabled={refreshing || loading}
+                aria-label={refreshing ? "Refreshing stats" : "Refresh stats"}
+              >
+                ↻
+              </button>
+            )}
             {canShowSettings && (
               <button
                 type="button"
@@ -878,7 +934,8 @@ const App = () => {
             <p className="eyebrow">WAKAWARS</p>
             <h2>Forge your focus arena</h2>
             <p className="muted">
-              Battle friends, win medals, and keep your WakaTime momentum visible.
+              Battle friends, win medals, and keep your WakaTime momentum
+              visible.
             </p>
           </div>
           <div className="hero-actions">
@@ -900,7 +957,9 @@ const App = () => {
           <div className="feature-grid">
             <div className="feature-card">
               <h3>Daily skirmishes</h3>
-              <p className="muted">See who leads today in minutes, not noise.</p>
+              <p className="muted">
+                See who leads today in minutes, not noise.
+              </p>
             </div>
             <div className="feature-card">
               <h3>Weekly crowns</h3>
@@ -908,7 +967,9 @@ const App = () => {
             </div>
             <div className="feature-card">
               <h3>Local-first</h3>
-              <p className="muted">No logins, no cloud accounts, just your data.</p>
+              <p className="muted">
+                No logins, no cloud accounts, just your data.
+              </p>
             </div>
           </div>
         </section>
@@ -1292,7 +1353,11 @@ const App = () => {
                         }
                         disabled={loading}
                       />
-                      <button className="ghost" type="submit" disabled={loading}>
+                      <button
+                        className="ghost"
+                        type="submit"
+                        disabled={loading}
+                      >
                         Add
                       </button>
                     </form>
@@ -1376,15 +1441,10 @@ const App = () => {
               <div className="league-title">
                 <span className="ribbon">Leaderboard</span>
                 <h2>
-                  {activeLeagueTab === "weekly"
-                    ? "Weekly leaderboard"
-                    : "Daily leaderboard"}
+                  <span>
+                    {activeLeagueTab === "weekly" ? "Weekly" : "Daily"}
+                  </span>
                 </h2>
-                <div className="league-meta">
-                  {activeLeagueTab === "weekly" && (
-                    <span className="meta-pill">{weeklyRangeLabel}</span>
-                  )}
-                </div>
               </div>
               <div className="league-actions">
                 <div className="tab-group">
@@ -1420,26 +1480,24 @@ const App = () => {
               ) : (
                 <div className="league-content">
                   <div className="list-section primary">
-                    <div className="list-header">
-                      <h3>Leaderboard</h3>
-                      <span className="muted">
-                        {activeEntries.length} rivals
-                      </span>
-                    </div>
                     <div className="list">
                       {activeLeagueTab === "weekly"
                         ? weeklyStats?.entries.map((entry) => (
                             <WeeklyLeaderboardRow
                               key={entry.username}
                               entry={entry}
-                              isSelf={entry.username === config?.wakawarsUsername}
+                              isSelf={
+                                entry.username === config?.wakawarsUsername
+                              }
                             />
                           ))
                         : stats?.entries.map((entry) => (
                             <LeaderboardRow
                               key={entry.username}
                               entry={entry}
-                              isSelf={entry.username === config?.wakawarsUsername}
+                              isSelf={
+                                entry.username === config?.wakawarsUsername
+                              }
                             />
                           ))}
                     </div>
@@ -1451,13 +1509,15 @@ const App = () => {
                           <h3>Yesterday's podium</h3>
                           <span className="muted">Top 3</span>
                         </div>
-                        {leaderboardSlices?.podium.length ? (
+                        {yesterdayPodium.length ? (
                           <div className="mini-list">
-                            {leaderboardSlices.podium.map((entry) => (
+                            {yesterdayPodium.map((entry) => (
                               <MiniRow
                                 key={`podium-${entry.username}`}
                                 entry={entry}
-                                isSelf={entry.username === config?.wakawarsUsername}
+                                isSelf={
+                                  entry.username === config?.wakawarsUsername
+                                }
                               />
                             ))}
                           </div>
@@ -1476,7 +1536,9 @@ const App = () => {
                               <MiniRow
                                 key={`near-${entry.username}`}
                                 entry={entry}
-                                isSelf={entry.username === config?.wakawarsUsername}
+                                isSelf={
+                                  entry.username === config?.wakawarsUsername
+                                }
                               />
                             ))}
                           </div>
@@ -1494,14 +1556,13 @@ const App = () => {
               </p>
             )}
           </section>
+          {/* 
           <section className="panel achievement-panel">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">Achievements</p>
                 <h2>Trophy vault</h2>
-                <p className="muted">
-                  Unlock badges by building momentum.
-                </p>
+                <p className="muted">Unlock badges by building momentum.</p>
               </div>
             </div>
             <QuestCard quests={quests} />
@@ -1514,6 +1575,7 @@ const App = () => {
               ))}
             </div>
           </section>
+          */}
           {showDockedAdd && (
             <AddFriendCard
               docked
@@ -1559,7 +1621,7 @@ const statusLabel = (
 const rankDisplay = (rank: number | null) => {
   return {
     rankLabel: rank ? `#${rank}` : "—",
-    podiumClass: rank && rank <= 3 ? `podium podium-${rank}` : ""
+    podiumClass: rank && rank <= 3 ? `podium podium-${rank}` : "",
   };
 };
 
@@ -1593,11 +1655,7 @@ const QuestCard = ({ quests }: { quests: Quest[] }) => (
   </div>
 );
 
-const AchievementCard = ({
-  achievement,
-}: {
-  achievement: Achievement;
-}) => (
+const AchievementCard = ({ achievement }: { achievement: Achievement }) => (
   <div className={`achievement-card ${achievement.status}`}>
     <div className="achievement-icon">{achievement.icon}</div>
     <div>
@@ -1616,13 +1674,7 @@ const AchievementCard = ({
   </div>
 );
 
-const MiniRow = ({
-  entry,
-  isSelf,
-}: {
-  entry: RowEntry;
-  isSelf: boolean;
-}) => {
+const MiniRow = ({ entry, isSelf }: { entry: RowEntry; isSelf: boolean }) => {
   const { rankLabel, podiumClass } = rankDisplay(entry.rank ?? null);
   const timeLabel = statusLabel(entry.status, entry.totalSeconds);
   const timeClass =
@@ -1649,12 +1701,13 @@ const BaseLeaderboardRow = ({
 }) => {
   const { rankLabel, podiumClass } = rankDisplay(entry.rank ?? null);
   const timeLabel = statusLabel(entry.status, entry.totalSeconds);
-  const timeClass =
-    entry.status === "ok" ? "time" : "time muted status";
+  const timeClass = entry.status === "ok" ? "time" : "time muted status";
 
   return (
     <div
-      className={`row-item ${isSelf ? "self" : ""} ${podiumClass} status-${entry.status}`}
+      className={`row-item ${isSelf ? "self" : ""} ${podiumClass} status-${
+        entry.status
+      }`}
     >
       <div className="row-item-left">
         <div className="avatar">{entry.username.slice(0, 1).toUpperCase()}</div>

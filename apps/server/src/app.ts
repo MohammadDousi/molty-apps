@@ -17,6 +17,7 @@ import {
   DEFAULT_WAKATIME_WEEKLY_CACHE_INTERVAL_MS,
   DEFAULT_WAKATIME_WEEKLY_RANGE,
 } from "./wakatime-weekly-cache.js";
+import { shiftDateKey, toDateKeyInTimeZone } from "./date-key.js";
 import { createPrismaClient } from "./db.js";
 import { createPrismaRepository, type UserRepository } from "./repository.js";
 import { hashPassword, verifyPassword } from "./auth.js";
@@ -133,6 +134,103 @@ export const createServer = ({
     }
 
     return { ok: true, user } as const;
+  };
+
+  const resolveDateKeyForUser = (
+    user: { wakatimeTimezone?: string | null },
+    offsetDays: number,
+    baseDate: Date
+  ) => {
+    const todayKey = toDateKeyInTimeZone(baseDate, user.wakatimeTimezone ?? null);
+    return shiftDateKey(todayKey, offsetDays);
+  };
+
+  const buildDailyLeaderboard = async (config: UserConfig, offsetDays: number) => {
+    const baseDate = new Date();
+    const groupPeerIds = new Set(await store.getGroupPeerIds(config.id));
+    const friendIds = new Set(config.friends.map((friend) => friend.id));
+    const userIds = Array.from(
+      new Set([config.id, ...friendIds, ...groupPeerIds])
+    );
+    const userRecords = await store.getUsersByIds(userIds);
+    const usersById = new Map(userRecords.map((user) => [user.id, user]));
+    const users = userIds
+      .map((id) => usersById.get(id))
+      .filter((user): user is NonNullable<typeof user> => Boolean(user));
+
+    const dateKeyGroups = new Map<string, number[]>();
+
+    users.forEach((user) => {
+      const dateKey = resolveDateKeyForUser(user, offsetDays, baseDate);
+      const existing = dateKeyGroups.get(dateKey);
+      if (existing) {
+        existing.push(user.id);
+      } else {
+        dateKeyGroups.set(dateKey, [user.id]);
+      }
+    });
+
+    const dailyStats = (
+      await Promise.all(
+        Array.from(dateKeyGroups.entries()).map(([dateKey, ids]) =>
+          store.getDailyStats({ userIds: ids, dateKey })
+        )
+      )
+    ).flat();
+    const statsByUserId = new Map(
+      dailyStats.map((stat) => [stat.userId, stat])
+    );
+    const incomingFriendIds = new Set(
+      await store.getIncomingFriendIds(config.id, userIds)
+    );
+    const stats: DailyStat[] = users.map((user) => {
+      const isSelf = user.id === config.id;
+      const stat = statsByUserId.get(user.id);
+      const isMutualFriend =
+        friendIds.has(user.id) && incomingFriendIds.has(user.id);
+      const isGroupConnected = groupPeerIds.has(user.id);
+      const canView =
+        isSelf ||
+        user.statsVisibility === "everyone" ||
+        (user.statsVisibility === "friends" &&
+          (isMutualFriend || isGroupConnected));
+      if (!canView) {
+        return {
+          username: user.wakawarsUsername,
+          totalSeconds: 0,
+          status: "private",
+          error: null,
+        };
+      }
+      if (!stat) {
+        return {
+          username: user.wakawarsUsername,
+          totalSeconds: 0,
+          status: "error",
+          error: "No stats synced yet",
+        };
+      }
+
+      return {
+        username: user.wakawarsUsername,
+        totalSeconds: stat.totalSeconds,
+        status: stat.status,
+        error: stat.error ?? null,
+      };
+    });
+
+    const entries = computeLeaderboard(stats, config.wakawarsUsername);
+    const updatedAtEpoch = dailyStats.length
+      ? Math.max(...dailyStats.map((stat) => stat.fetchedAt.getTime()))
+      : Date.now();
+
+    const response: LeaderboardResponse = {
+      date: resolveDateKeyForUser(config, offsetDays, baseDate),
+      updatedAt: new Date(updatedAtEpoch).toISOString(),
+      entries,
+    };
+
+    return response;
   };
 
   const app = new Elysia({ adapter: node() })
@@ -298,6 +396,7 @@ export const createServer = ({
               void statusSync.syncUser({
                 id: created.id,
                 apiKey: created.apiKey,
+                wakatimeTimezone: created.wakatimeTimezone ?? null,
               });
             }
             if (shouldCacheWeekly) {
@@ -600,83 +699,52 @@ export const createServer = ({
             return { error: "App is not configured" };
           }
 
-          const groupMemberIds = new Set(
-            config.groups.flatMap((group) => group.members.map((member) => member.id))
-          );
-          const friendIds = new Set(config.friends.map((friend) => friend.id));
-          const userIds = Array.from(
-            new Set([config.id, ...friendIds, ...groupMemberIds])
-          );
-          const userRecords = await store.getUsersByIds(userIds);
-          const usersById = new Map(userRecords.map((user) => [user.id, user]));
-          const users = userIds
-            .map((id) => usersById.get(id))
-            .filter((user): user is NonNullable<typeof user> => Boolean(user));
+          return buildDailyLeaderboard(config, 0);
+        })
+        .get("/stats/yesterday", async ({ set, headers }) => {
+          const authCheck = await requireSession(headers, set);
+          if (!authCheck.ok) {
+            return { error: "Unauthorized" };
+          }
 
-          const dateKey = new Date().toISOString().slice(0, 10);
-          const dailyStats = await store.getDailyStats({
-            userIds,
-            dateKey,
-          });
-          const statsByUserId = new Map(
-            dailyStats.map((stat) => [stat.userId, stat])
-          );
-          const incomingFriendIds = new Set(
-            await store.getIncomingFriendIds(config.id, userIds)
-          );
-          const incomingGroupOwnerIds = new Set(
-            await store.getGroupOwnerIdsForMember(config.id, userIds)
-          );
+          const config = await store.getUserById(authCheck.user.id);
+          if (!config) {
+            set.status = 401;
+            return { error: "Unauthorized" };
+          }
 
-          const stats: DailyStat[] = users.map((user) => {
-            const isSelf = user.id === config.id;
-            const stat = statsByUserId.get(user.id);
-            const isMutualFriend =
-              friendIds.has(user.id) && incomingFriendIds.has(user.id);
-            const isGroupConnected =
-              groupMemberIds.has(user.id) || incomingGroupOwnerIds.has(user.id);
-            const canView =
-              isSelf ||
-              user.statsVisibility === "everyone" ||
-              (user.statsVisibility === "friends" &&
-                (isMutualFriend || isGroupConnected));
-            if (!canView) {
-              return {
-                username: user.wakawarsUsername,
-                totalSeconds: 0,
-                status: "private",
-                error: null,
-              };
-            }
-            if (!stat) {
-              return {
-                username: user.wakawarsUsername,
-                totalSeconds: 0,
-                status: "error",
-                error: "No stats synced yet",
-              };
-            }
+          if (!config.wakawarsUsername || !config.apiKey) {
+            set.status = 400;
+            return { error: "App is not configured" };
+          }
 
-            return {
-              username: user.wakawarsUsername,
-              totalSeconds: stat.totalSeconds,
-              status: stat.status,
-              error: stat.error ?? null,
-            };
+          return buildDailyLeaderboard(config, -1);
+        })
+        .post("/stats/refresh", async ({ set, headers }) => {
+          const authCheck = await requireSession(headers, set);
+          if (!authCheck.ok) {
+            return { error: "Unauthorized" };
+          }
+
+          const config = await store.getUserById(authCheck.user.id);
+          if (!config) {
+            set.status = 401;
+            return { error: "Unauthorized" };
+          }
+
+          if (!config.wakawarsUsername || !config.apiKey) {
+            set.status = 400;
+            return { error: "App is not configured" };
+          }
+
+          await statusSync.syncUser({
+            id: config.id,
+            apiKey: config.apiKey,
+            wakatimeTimezone: config.wakatimeTimezone ?? null,
+            bypassCache: true
           });
 
-          const entries = computeLeaderboard(stats, config.wakawarsUsername);
-          const updatedAtEpoch = dailyStats.length
-            ? Math.max(...dailyStats.map((stat) => stat.fetchedAt.getTime()))
-            : Date.now();
-
-          const response: LeaderboardResponse = {
-            date: dateKey,
-            updatedAt: new Date(updatedAtEpoch).toISOString(),
-            entries,
-          };
-
-          return response;
+          return buildDailyLeaderboard(config, 0);
         })
         .get("/stats/weekly", async ({ set, headers }) => {
           const authCheck = await requireSession(headers, set);
@@ -695,12 +763,10 @@ export const createServer = ({
             return { error: "App is not configured" };
           }
 
-          const groupMemberIds = new Set(
-            config.groups.flatMap((group) => group.members.map((member) => member.id))
-          );
+          const groupPeerIds = new Set(await store.getGroupPeerIds(config.id));
           const friendIds = new Set(config.friends.map((friend) => friend.id));
           const userIds = Array.from(
-            new Set([config.id, ...friendIds, ...groupMemberIds])
+            new Set([config.id, ...friendIds, ...groupPeerIds])
           );
           const userRecords = await store.getUsersByIds(userIds);
           const usersById = new Map(userRecords.map((user) => [user.id, user]));
@@ -715,17 +781,12 @@ export const createServer = ({
           const incomingFriendIds = new Set(
             await store.getIncomingFriendIds(config.id, userIds)
           );
-          const incomingGroupOwnerIds = new Set(
-            await store.getGroupOwnerIdsForMember(config.id, userIds)
-          );
-
           const stats: WeeklyStat[] = users.map((user) => {
             const isSelf = user.id === config.id;
             const stat = statsByUserId.get(user.id);
             const isMutualFriend =
               friendIds.has(user.id) && incomingFriendIds.has(user.id);
-            const isGroupConnected =
-              groupMemberIds.has(user.id) || incomingGroupOwnerIds.has(user.id);
+            const isGroupConnected = groupPeerIds.has(user.id);
             const canView =
               isSelf ||
               user.statsVisibility === "everyone" ||

@@ -11,6 +11,7 @@ model ww_user {
   id                Int             @id @default(autoincrement())
   wakawars_username String          @unique
   api_key           String          @default("")
+  wakatime_timezone String?
   password_hash     String?
   stats_visibility  ww_stats_visibility @default(everyone)
   friendships       ww_friendship[] @relation("user_friendships")
