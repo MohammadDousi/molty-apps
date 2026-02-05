@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   formatDuration,
+  computeLeaderboard,
   sliceLeaderboard,
   type LeaderboardEntry,
   type LeaderboardResponse,
@@ -108,6 +109,15 @@ const App = () => {
     useState<LeaderboardResponse | null>(null);
   const [weeklyStats, setWeeklyStats] =
     useState<WeeklyLeaderboardResponse | null>(null);
+  const [competitionState, setCompetitionState] = useState<boolean | null>(null);
+  const [dailyEntries, setDailyEntries] = useState<LeaderboardEntry[]>([]);
+  const [selfDailyEntry, setSelfDailyEntry] =
+    useState<LeaderboardEntry | null>(null);
+  const [weeklyEntries, setWeeklyEntries] = useState<WeeklyLeaderboardEntry[]>(
+    []
+  );
+  const [selfWeeklyEntry, setSelfWeeklyEntry] =
+    useState<WeeklyLeaderboardEntry | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -150,11 +160,45 @@ const App = () => {
     }
     return "dark";
   });
+  const [menuBarTimeEnabled, setMenuBarTimeEnabled] = useState(() => {
+    const supported =
+      typeof window !== "undefined" && Boolean(window.molty?.setTrayTitle);
+    if (!supported) return false;
+    const stored = localStorage.getItem("wakawarsMenuBarTime");
+    if (stored === "true") return true;
+    if (stored === "false") return false;
+    return true;
+  });
+  const [menuBarRankEnabled, setMenuBarRankEnabled] = useState(() => {
+    const stored = localStorage.getItem("wakawarsMenuBarRank");
+    if (stored === "true") return true;
+    if (stored === "false") return false;
+    return false;
+  });
 
   const isAuthenticated = Boolean(session?.authenticated);
   const isConfigured = Boolean(config?.wakawarsUsername && config?.hasApiKey);
   const shouldIncludeWeekly =
     activeLeagueTab === "weekly" || Boolean(weeklyStats);
+  const menuBarTimeSupported =
+    typeof window !== "undefined" && Boolean(window.molty?.setTrayTitle);
+  const lastDailySelfIndexRef = useRef<number | null>(null);
+  const lastWeeklySelfIndexRef = useRef<number | null>(null);
+  const loadStatsAbortRef = useRef<AbortController | null>(null);
+  const loadStatsSeqRef = useRef(0);
+  const competitionPendingRef = useRef(false);
+  const competitionRequestAbortRef = useRef<AbortController | null>(null);
+  const competitionDebounceRef = useRef<number | null>(null);
+  const competitionRequestIdRef = useRef(0);
+  const competitionRollbackRef = useRef<{
+    previousConfig: PublicConfig | null;
+    previousStats: LeaderboardResponse | null;
+    previousWeeklyStats: WeeklyLeaderboardResponse | null;
+    previousDailyEntries: LeaderboardEntry[];
+    previousWeeklyEntries: WeeklyLeaderboardEntry[];
+    previousSelfDailyEntry: LeaderboardEntry | null;
+    previousSelfWeeklyEntry: WeeklyLeaderboardEntry | null;
+  } | null>(null);
 
   const request = useCallback(
     async <T,>(path: string, options?: RequestInit): Promise<T> => {
@@ -250,6 +294,19 @@ const App = () => {
       includeWeekly?: boolean;
     } = {}) => {
       if (!isConfigured || !isAuthenticated) return;
+      if (
+        competitionPendingRef.current &&
+        competitionState !== null &&
+        config &&
+        competitionState !== config.isCompeting
+      ) {
+        loadStatsAbortRef.current?.abort();
+        return;
+      }
+      loadStatsAbortRef.current?.abort();
+      const controller = new AbortController();
+      loadStatsAbortRef.current = controller;
+      const requestId = ++loadStatsSeqRef.current;
       if (!silent) {
         setLoading(true);
       }
@@ -257,25 +314,47 @@ const App = () => {
         const tasks: Array<
           Promise<LeaderboardResponse | WeeklyLeaderboardResponse>
         > = [
-          request<LeaderboardResponse>("/stats/today"),
-          request<LeaderboardResponse>("/stats/yesterday"),
+          request<LeaderboardResponse>("/stats/today", {
+            signal: controller.signal,
+          }),
+          request<LeaderboardResponse>("/stats/yesterday", {
+            signal: controller.signal,
+          }),
         ];
 
         if (includeWeekly) {
-          tasks.push(request<WeeklyLeaderboardResponse>("/stats/weekly"));
+          tasks.push(
+            request<WeeklyLeaderboardResponse>("/stats/weekly", {
+              signal: controller.signal,
+            })
+          );
         }
 
         const results = await Promise.allSettled(tasks);
+        if (controller.signal.aborted || loadStatsSeqRef.current !== requestId) {
+          return;
+        }
         let nextError: string | null = null;
 
         const dailyResult = results[0];
         if (dailyResult.status === "fulfilled") {
-          setStats(dailyResult.value as LeaderboardResponse);
+          const payload = dailyResult.value as LeaderboardResponse;
+          setStats(payload);
+          setDailyEntries(payload.entries);
+          const nextSelf =
+            payload.selfEntry ??
+            payload.entries.find(
+              (entry) => entry.username === config?.wakawarsUsername
+            ) ??
+            null;
+          setSelfDailyEntry(nextSelf);
         } else {
-          nextError =
-            dailyResult.reason instanceof Error
-              ? dailyResult.reason.message
-              : "Failed to load stats";
+          if (dailyResult.reason?.name !== "AbortError") {
+            nextError =
+              dailyResult.reason instanceof Error
+                ? dailyResult.reason.message
+                : "Failed to load stats";
+          }
         }
 
         const yesterdayResult = results[1];
@@ -286,25 +365,46 @@ const App = () => {
         if (includeWeekly) {
           const weeklyResult = results[2];
           if (weeklyResult?.status === "fulfilled") {
-            setWeeklyStats(weeklyResult.value as WeeklyLeaderboardResponse);
+            const payload = weeklyResult.value as WeeklyLeaderboardResponse;
+            setWeeklyStats(payload);
+            setWeeklyEntries(payload.entries);
+            const nextSelf =
+              payload.selfEntry ??
+              payload.entries.find(
+                (entry) => entry.username === config?.wakawarsUsername
+              ) ??
+              null;
+            setSelfWeeklyEntry(nextSelf);
           } else if (weeklyResult?.status === "rejected") {
             if (activeLeagueTab === "weekly") {
-              nextError =
-                weeklyResult.reason instanceof Error
-                  ? weeklyResult.reason.message
-                  : "Failed to load weekly stats";
+              if (weeklyResult.reason?.name !== "AbortError") {
+                nextError =
+                  weeklyResult.reason instanceof Error
+                    ? weeklyResult.reason.message
+                    : "Failed to load weekly stats";
+              }
             }
           }
         }
 
-        setError(nextError);
+        if (loadStatsSeqRef.current === requestId) {
+          setError(nextError);
+        }
       } finally {
-        if (!silent) {
+        if (!silent && loadStatsSeqRef.current === requestId) {
           setLoading(false);
         }
       }
     },
-    [isConfigured, isAuthenticated, request, activeLeagueTab]
+    [
+      isConfigured,
+      isAuthenticated,
+      request,
+      activeLeagueTab,
+      config?.wakawarsUsername,
+      config?.isCompeting,
+      competitionState,
+    ]
   );
 
   useEffect(() => {
@@ -331,6 +431,17 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    if (!config) return;
+    if (competitionPendingRef.current) {
+      if (competitionState !== null && competitionState !== config.isCompeting) {
+        return;
+      }
+      competitionPendingRef.current = false;
+    }
+    setCompetitionState(config.isCompeting);
+  }, [config?.isCompeting, competitionState]);
+
+  useEffect(() => {
     if (!window.molty?.getLoginItemSettings) return;
     window.molty
       .getLoginItemSettings()
@@ -348,6 +459,20 @@ const App = () => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("wakawarsTheme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "wakawarsMenuBarTime",
+      menuBarTimeEnabled ? "true" : "false"
+    );
+  }, [menuBarTimeEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "wakawarsMenuBarRank",
+      menuBarRankEnabled ? "true" : "false"
+    );
+  }, [menuBarRankEnabled]);
 
   useEffect(() => {
     checkForUpdates();
@@ -690,6 +815,150 @@ const App = () => {
     }
   };
 
+  const handleCompetitionToggle = async () => {
+    if (!config) return;
+    loadStatsAbortRef.current?.abort();
+    competitionPendingRef.current = true;
+    const nextValue =
+      competitionState === null ? !config.isCompeting : !competitionState;
+    const selfUsername = config.wakawarsUsername;
+    const dailySelfIndex = dailyEntries.findIndex(
+      (entry) => entry.username === selfUsername
+    );
+    const fallbackDailyEntry =
+      selfDailyEntry ??
+      stats?.selfEntry ??
+      stats?.entries.find((entry) => entry.username === selfUsername) ??
+      null;
+    const dailySelfEntry =
+      dailySelfIndex >= 0 ? dailyEntries[dailySelfIndex] : fallbackDailyEntry;
+    const weeklySelfIndex = weeklyEntries.findIndex(
+      (entry) => entry.username === selfUsername
+    );
+    const fallbackWeeklyEntry =
+      selfWeeklyEntry ??
+      weeklyStats?.selfEntry ??
+      weeklyStats?.entries.find((entry) => entry.username === selfUsername) ??
+      null;
+    const weeklySelfEntry =
+      weeklySelfIndex >= 0 ? weeklyEntries[weeklySelfIndex] : fallbackWeeklyEntry;
+
+    competitionRollbackRef.current = {
+      previousConfig: config,
+      previousStats: stats,
+      previousWeeklyStats: weeklyStats,
+      previousDailyEntries: dailyEntries,
+      previousWeeklyEntries: weeklyEntries,
+      previousSelfDailyEntry: selfDailyEntry,
+      previousSelfWeeklyEntry: selfWeeklyEntry,
+    };
+    setCompetitionState(nextValue);
+
+    const recomputeEntries = <T extends LeaderboardEntry | WeeklyLeaderboardEntry>(
+      entries: T[]
+    ): T[] => computeLeaderboard(entries, selfUsername) as T[];
+
+    if (!nextValue) {
+      if (dailySelfIndex >= 0) {
+        lastDailySelfIndexRef.current = dailySelfIndex;
+      }
+      if (weeklySelfIndex >= 0) {
+        lastWeeklySelfIndexRef.current = weeklySelfIndex;
+      }
+
+      const nextDailyEntries = recomputeEntries(
+        dailyEntries.filter((entry) => entry.username !== selfUsername)
+      );
+      const nextWeeklyEntries = recomputeEntries(
+        weeklyEntries.filter((entry) => entry.username !== selfUsername)
+      );
+
+      setDailyEntries(nextDailyEntries);
+      setWeeklyEntries(nextWeeklyEntries);
+
+      if (dailySelfEntry) {
+        setSelfDailyEntry(dailySelfEntry);
+      }
+      if (weeklySelfEntry) {
+        setSelfWeeklyEntry(weeklySelfEntry);
+      }
+
+      setStats((prev) =>
+        prev
+          ? {
+              ...prev,
+              entries: nextDailyEntries,
+              selfEntry: dailySelfEntry ?? prev.selfEntry ?? null,
+            }
+          : prev
+      );
+      setWeeklyStats((prev) =>
+        prev
+          ? {
+              ...prev,
+              entries: nextWeeklyEntries,
+              selfEntry: weeklySelfEntry ?? prev.selfEntry ?? null,
+            }
+          : prev
+      );
+    } else {
+      if (dailySelfEntry) {
+        const hasSelf = dailyEntries.some(
+          (entry) => entry.username === selfUsername
+        );
+        const nextDailyEntries = recomputeEntries(
+          hasSelf ? dailyEntries : [...dailyEntries, dailySelfEntry]
+        );
+        const updatedSelf = nextDailyEntries.find(
+          (entry) => entry.username === selfUsername
+        );
+        if (updatedSelf) {
+          setSelfDailyEntry(updatedSelf);
+          lastDailySelfIndexRef.current = nextDailyEntries.findIndex(
+            (entry) => entry.username === selfUsername
+          );
+        }
+        setDailyEntries(nextDailyEntries);
+        setStats((prev) =>
+          prev
+            ? {
+                ...prev,
+                entries: nextDailyEntries,
+                selfEntry: updatedSelf ?? prev.selfEntry ?? dailySelfEntry,
+              }
+            : prev
+        );
+      }
+      if (weeklySelfEntry) {
+        const hasSelf = weeklyEntries.some(
+          (entry) => entry.username === selfUsername
+        );
+        const nextWeeklyEntries = recomputeEntries(
+          hasSelf ? weeklyEntries : [...weeklyEntries, weeklySelfEntry]
+        );
+        const updatedSelf = nextWeeklyEntries.find(
+          (entry) => entry.username === selfUsername
+        );
+        if (updatedSelf) {
+          setSelfWeeklyEntry(updatedSelf);
+          lastWeeklySelfIndexRef.current = nextWeeklyEntries.findIndex(
+            (entry) => entry.username === selfUsername
+          );
+        }
+        setWeeklyEntries(nextWeeklyEntries);
+        setWeeklyStats((prev) =>
+          prev
+            ? {
+                ...prev,
+                entries: nextWeeklyEntries,
+                selfEntry: updatedSelf ?? prev.selfEntry ?? weeklySelfEntry,
+              }
+            : prev
+        );
+      }
+    }
+  };
+
   const handleRetry = () => {
     setError(null);
     loadSession();
@@ -697,7 +966,7 @@ const App = () => {
     loadStats({ silent: true, includeWeekly: shouldIncludeWeekly });
   };
 
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     if (!isConfigured || !isAuthenticated || refreshing) return;
     setRefreshing(true);
     try {
@@ -709,7 +978,94 @@ const App = () => {
     } finally {
       setRefreshing(false);
     }
-  };
+  }, [
+    isConfigured,
+    isAuthenticated,
+    refreshing,
+    request,
+    loadStats,
+    shouldIncludeWeekly,
+  ]);
+
+  useEffect(() => {
+    if (!config || competitionState === null) return;
+    if (competitionState === config.isCompeting) {
+      competitionPendingRef.current = false;
+      competitionRollbackRef.current = null;
+      competitionRequestAbortRef.current?.abort();
+      if (competitionDebounceRef.current) {
+        window.clearTimeout(competitionDebounceRef.current);
+        competitionDebounceRef.current = null;
+      }
+      return;
+    }
+
+    competitionPendingRef.current = true;
+
+    if (competitionDebounceRef.current) {
+      window.clearTimeout(competitionDebounceRef.current);
+      competitionDebounceRef.current = null;
+    }
+
+    competitionRequestAbortRef.current?.abort();
+    const controller = new AbortController();
+    competitionRequestAbortRef.current = controller;
+
+    const requestId = ++competitionRequestIdRef.current;
+    competitionDebounceRef.current = window.setTimeout(() => {
+      request<PublicConfig>("/competition", {
+        method: "POST",
+        body: JSON.stringify({ isCompeting: competitionState }),
+        signal: controller.signal,
+      })
+        .then((payload) => {
+          if (competitionRequestIdRef.current !== requestId) return;
+          competitionPendingRef.current = false;
+          competitionRollbackRef.current = null;
+          setConfig(payload);
+          setError(null);
+          return loadStats({ silent: true, includeWeekly: shouldIncludeWeekly });
+        })
+        .catch((err) => {
+          if (competitionRequestIdRef.current !== requestId) return;
+          if (err?.name === "AbortError") return;
+          competitionPendingRef.current = false;
+          const rollback = competitionRollbackRef.current;
+          if (rollback) {
+            setConfig(rollback.previousConfig);
+            if (rollback.previousStats) {
+              setStats(rollback.previousStats);
+            }
+            if (rollback.previousWeeklyStats) {
+              setWeeklyStats(rollback.previousWeeklyStats);
+            }
+            setDailyEntries(rollback.previousDailyEntries);
+            setWeeklyEntries(rollback.previousWeeklyEntries);
+            setSelfDailyEntry(rollback.previousSelfDailyEntry);
+            setSelfWeeklyEntry(rollback.previousSelfWeeklyEntry);
+            setCompetitionState(rollback.previousConfig?.isCompeting ?? null);
+          }
+          setError(
+            err instanceof Error ? err.message : "Failed to update competition"
+          );
+        });
+    }, 400);
+
+    return () => {
+      if (competitionDebounceRef.current) {
+        window.clearTimeout(competitionDebounceRef.current);
+        competitionDebounceRef.current = null;
+      }
+    };
+  }, [competitionState, config, request, loadStats, shouldIncludeWeekly]);
+
+  useEffect(() => {
+    if (!window.molty?.onWindowOpen) return;
+    const unsubscribe = window.molty.onWindowOpen(() => {
+      void handleRefresh();
+    });
+    return unsubscribe;
+  }, [handleRefresh]);
 
   const handleUpdate = () => {
     window.location.reload();
@@ -735,7 +1091,8 @@ const App = () => {
   }, [weeklyStats?.range]);
 
   const activeStats = activeLeagueTab === "weekly" ? weeklyStats : stats;
-  const activeEntries: RowEntry[] = activeStats?.entries ?? [];
+  const activeEntries: RowEntry[] =
+    activeLeagueTab === "weekly" ? weeklyEntries : dailyEntries;
 
   const yesterdayPodium = useMemo(() => {
     if (!config?.wakawarsUsername || !yesterdayStats?.entries?.length) {
@@ -746,23 +1103,86 @@ const App = () => {
     }).podium;
   }, [config?.wakawarsUsername, yesterdayStats?.entries]);
 
-  const selfDailyEntry = useMemo(() => {
-    if (!config?.wakawarsUsername || !stats?.entries) return null;
-    return (
-      stats.entries.find(
-        (entry) => entry.username === config.wakawarsUsername
-      ) ?? null
-    );
-  }, [config?.wakawarsUsername, stats?.entries]);
+  const isCompeting = competitionState ?? config?.isCompeting ?? true;
 
-  const selfWeeklyEntry = useMemo(() => {
-    if (!config?.wakawarsUsername || !weeklyStats?.entries) return null;
-    return (
-      weeklyStats.entries.find(
-        (entry) => entry.username === config.wakawarsUsername
-      ) ?? null
+  const menuBarTitle = useMemo(() => {
+    if (!isAuthenticated || !isConfigured) return "";
+    if (!selfDailyEntry || selfDailyEntry.status !== "ok") return "";
+    const rankValue =
+      isCompeting &&
+      typeof selfDailyEntry.rank === "number" &&
+      selfDailyEntry.rank > 0
+        ? selfDailyEntry.rank
+        : null;
+    const timeLabel = menuBarTimeEnabled
+      ? formatDuration(selfDailyEntry.totalSeconds)
+      : null;
+
+    if (menuBarRankEnabled && rankValue && timeLabel) {
+      return `#${rankValue}: ${timeLabel}`;
+    }
+    if (menuBarRankEnabled && rankValue && !timeLabel) {
+      return `#${rankValue}`;
+    }
+    if (!menuBarRankEnabled && timeLabel) {
+      return timeLabel;
+    }
+    return "";
+  }, [
+    menuBarTimeEnabled,
+    menuBarRankEnabled,
+    isAuthenticated,
+    isConfigured,
+    selfDailyEntry,
+    isCompeting,
+  ]);
+
+  const competitionButtonLabel = isCompeting
+    ? "Leave Competition"
+    : "Join Competition";
+  const selfPinnedEntry =
+    !isCompeting && activeLeagueTab === "weekly"
+      ? selfWeeklyEntry
+      : !isCompeting
+        ? selfDailyEntry
+        : null;
+  const displayPinnedEntry = selfPinnedEntry
+    ? { ...selfPinnedEntry, rank: null, deltaSeconds: 0 }
+    : null;
+  const hasPinnedEntry = Boolean(selfPinnedEntry);
+  const pinnedUsername = selfPinnedEntry?.username ?? null;
+  const activeSelfEntry =
+    activeLeagueTab === "weekly" ? selfWeeklyEntry : selfDailyEntry;
+  const activeInsertIndex =
+    activeLeagueTab === "weekly"
+      ? lastWeeklySelfIndexRef.current
+      : lastDailySelfIndexRef.current;
+  const listEntries = useMemo(() => {
+    if (pinnedUsername) {
+      return activeEntries.filter((entry) => entry.username !== pinnedUsername);
+    }
+    if (!isCompeting || !activeSelfEntry) return activeEntries;
+    const hasSelf = activeEntries.some(
+      (entry) => entry.username === activeSelfEntry.username
     );
-  }, [config?.wakawarsUsername, weeklyStats?.entries]);
+    if (hasSelf) return activeEntries;
+    const next = [...activeEntries];
+    const insertIndex = activeInsertIndex ?? next.length;
+    const index = Math.max(0, Math.min(insertIndex, next.length));
+    next.splice(index, 0, activeSelfEntry);
+    return next;
+  }, [
+    pinnedUsername,
+    activeEntries,
+    isCompeting,
+    activeSelfEntry,
+    activeInsertIndex,
+  ]);
+
+  useEffect(() => {
+    if (!window.molty?.setTrayTitle) return;
+    void window.molty.setTrayTitle(menuBarTitle);
+  }, [menuBarTitle]);
 
   const achievements = useMemo(
     () =>
@@ -1158,26 +1578,6 @@ const App = () => {
           <section className="panel settings-panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Profile</p>
-                <h2>Player identity</h2>
-                <p className="muted">Your WakaWars badge and token status.</p>
-              </div>
-            </div>
-            <div className="settings-list">
-              <div className="settings-row">
-                <span className="muted">WakaWars username</span>
-                <span>{config?.wakawarsUsername}</span>
-              </div>
-              <div className="settings-row">
-                <span className="muted">API key</span>
-                <span>{config?.hasApiKey ? "Connected" : "Missing"}</span>
-              </div>
-            </div>
-          </section>
-
-          <section className="panel settings-panel">
-            <div className="panel-head">
-              <div>
                 <p className="eyebrow">Shield</p>
                 <h2>Device shield</h2>
                 <p className="muted">Keep this Mac locked to your squad.</p>
@@ -1444,6 +1844,33 @@ const App = () => {
                 </label>
               </div>
               <div className="settings-row">
+                <span className="muted">Menu bar time</span>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={menuBarTimeEnabled}
+                    onChange={(event) =>
+                      setMenuBarTimeEnabled(event.target.checked)
+                    }
+                    disabled={!menuBarTimeSupported}
+                  />
+                  <span className="toggle-ui" />
+                </label>
+              </div>
+              <div className="settings-row">
+                <span className="muted">Menu bar rank</span>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={menuBarRankEnabled}
+                    onChange={(event) =>
+                      setMenuBarRankEnabled(event.target.checked)
+                    }
+                  />
+                  <span className="toggle-ui" />
+                </label>
+              </div>
+              <div className="settings-row">
                 <span className="muted">Light theme</span>
                 <label className="toggle">
                   <input
@@ -1468,6 +1895,11 @@ const App = () => {
                 Launch at login is available in the macOS app.
               </p>
             )}
+            {!menuBarTimeSupported && (
+              <p className="muted">
+                Menu bar time is available in the macOS app.
+              </p>
+            )}
           </section>
 
           <AddFriendCard
@@ -1488,10 +1920,11 @@ const App = () => {
           <section className="panel league-panel">
             <div className="league-header">
               <div className="league-title">
-                <span className="ribbon">Leaderboard</span>
                 <h2>
                   <span>
-                    {activeLeagueTab === "weekly" ? "Weekly" : "Daily"}
+                    {activeLeagueTab === "weekly"
+                      ? "Weekly leaderboard"
+                      : "Daily leaderboard"}
                   </span>
                 </h2>
               </div>
@@ -1516,10 +1949,21 @@ const App = () => {
                     Week
                   </button>
                 </div>
+                {config && (
+                  <button
+                    type="button"
+                    className={`ghost competition-toggle ${
+                      isCompeting ? "danger" : ""
+                    }`}
+                    onClick={handleCompetitionToggle}
+                  >
+                    {competitionButtonLabel}
+                  </button>
+                )}
               </div>
             </div>
             {activeStats ? (
-              activeEntries.length === 0 ? (
+              listEntries.length === 0 && !hasPinnedEntry ? (
                 <div className="empty-state">
                   <h3>No rivals yet</h3>
                   <p className="muted">
@@ -1529,27 +1973,47 @@ const App = () => {
               ) : (
                 <div className="league-content">
                   <div className="list-section primary">
-                    <div className="list">
-                      {activeLeagueTab === "weekly"
-                        ? weeklyStats?.entries.map((entry) => (
+                    {listEntries.length === 0 && !hasPinnedEntry ? (
+                      <p className="muted">No rivals yet.</p>
+                    ) : (
+                      <div className="list">
+                        {displayPinnedEntry &&
+                          (activeLeagueTab === "weekly" ? (
                             <WeeklyLeaderboardRow
-                              key={entry.username}
-                              entry={entry}
-                              isSelf={
-                                entry.username === config?.wakawarsUsername
+                              key={`self-${displayPinnedEntry.username}`}
+                              entry={
+                                displayPinnedEntry as WeeklyLeaderboardEntry
                               }
+                              isSelf
                             />
-                          ))
-                        : stats?.entries.map((entry) => (
+                          ) : (
                             <LeaderboardRow
-                              key={entry.username}
-                              entry={entry}
-                              isSelf={
-                                entry.username === config?.wakawarsUsername
-                              }
+                              key={`self-${displayPinnedEntry.username}`}
+                              entry={displayPinnedEntry as LeaderboardEntry}
+                              isSelf
                             />
                           ))}
-                    </div>
+                        {activeLeagueTab === "weekly"
+                          ? listEntries.map((entry) => (
+                              <WeeklyLeaderboardRow
+                                key={entry.username}
+                                entry={entry as WeeklyLeaderboardEntry}
+                                isSelf={
+                                  entry.username === config?.wakawarsUsername
+                                }
+                              />
+                            ))
+                          : listEntries.map((entry) => (
+                              <LeaderboardRow
+                                key={entry.username}
+                                entry={entry as LeaderboardEntry}
+                                isSelf={
+                                  entry.username === config?.wakawarsUsername
+                                }
+                              />
+                            ))}
+                      </div>
+                    )}
                   </div>
                   <div className="league-grid">
                     <div className="league-side">

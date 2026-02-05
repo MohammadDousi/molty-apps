@@ -1,6 +1,6 @@
 {
   "name": "@molty/wakawars",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "main": "dist/main.js",
@@ -9,7 +9,7 @@
     "dev:main": "tsc -p tsconfig.main.json --watch",
     "dev:electron": "wait-on dist/main.js http-get://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron dist/main.js",
     "build": "npm run build:main",
-    "build:main": "tsc -p tsconfig.main.json",
+    "build:main": "tsc -p tsconfig.main.json && node scripts/copy-preload.cjs",
     "pack": "npm run build && electron-builder --mac --publish=never",
     "dist": "npm run build && electron-builder --mac --publish=always",
     "lint": "echo \"lint not configured\""

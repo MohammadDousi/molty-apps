@@ -24,6 +24,7 @@ const __dirname = path.dirname(__filename);
 
 let tray: TrayType | null = null;
 let mainWindow: BrowserWindowType | null = null;
+let trayTitle = "";
 const apiBase = app.isPackaged
   ? "https://core.molty.cool/wakawars/v0"
   : "http://localhost:3000/wakawars/v0";
@@ -77,8 +78,18 @@ const updateTrayIcon = () => {
   tray.setPressedImage(icon);
 };
 
+const applyTrayTitle = () => {
+  if (!tray) return;
+  if (process.platform !== "darwin") return;
+  if (typeof tray.setTitle === "function") {
+    tray.setTitle(trayTitle);
+  }
+};
+
 const createWindow = () => {
-  const preloadPath = path.join(__dirname, "preload.js");
+  const preloadPath = app.isPackaged
+    ? path.join(__dirname, "preload.cjs")
+    : path.join(__dirname, "..", "src", "preload.cjs");
 
   mainWindow = new BrowserWindow({
     width: 360,
@@ -100,6 +111,18 @@ const createWindow = () => {
   mainWindow.on("blur", () => {
     if (!mainWindow?.webContents.isDevToolsOpened()) {
       mainWindow?.hide();
+    }
+  });
+  mainWindow.on("show", () => {
+    if (!mainWindow) return;
+    const sendOpened = () => {
+      mainWindow?.webContents.send("wakawars:window-opened");
+    };
+
+    if (mainWindow.webContents.isLoading()) {
+      mainWindow.webContents.once("did-finish-load", sendOpened);
+    } else {
+      sendOpened();
     }
   });
 
@@ -150,6 +173,7 @@ const createTray = () => {
   tray = new Tray(icon);
   tray.setToolTip("WakaWars");
   tray.setPressedImage(icon);
+  applyTrayTitle();
 
   tray.on("click", toggleWindow);
   tray.on("right-click", () => {
@@ -203,6 +227,11 @@ ipcMain.handle("get-login-item-settings", () => getLoginItemSettings());
 ipcMain.handle("set-login-item-settings", (_event, openAtLogin: boolean) =>
   setLoginItemSettings(openAtLogin)
 );
+ipcMain.handle("set-tray-title", (_event, title?: string) => {
+  trayTitle = typeof title === "string" ? title : "";
+  applyTrayTitle();
+  return { ok: true };
+});
 ipcMain.handle("check-for-updates", async () => {
   if (!app.isPackaged) {
     return { status: "disabled" };

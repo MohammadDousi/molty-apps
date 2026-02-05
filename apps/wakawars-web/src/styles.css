@@ -366,6 +366,20 @@ h3 {
   gap: 8px;
 }
 
+.league-actions .tab-group,
+.league-actions .competition-toggle {
+  height: 32px;
+  box-sizing: border-box;
+}
+
+.competition-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  border-radius: 999px;
+}
+
 .league-content {
   display: flex;
   flex-direction: column;
@@ -870,7 +884,7 @@ h3 {
 
 .tab-button {
   border-radius: 999px;
-  padding: 5px 12px;
+  padding: 4px 12px;
   font-size: 10px;
   background: transparent;
   color: var(--muted);
@@ -878,12 +892,24 @@ h3 {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   font-weight: 700;
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.35);
+  transition: padding 0.08s ease, box-shadow 0.08s ease;
+  box-sizing: border-box;
 }
 
 .tab-button.active {
   background: rgba(255, 209, 102, 0.22);
   color: #1b1c24;
   border-color: var(--stroke);
+  padding-top: 5px;
+  padding-bottom: 3px;
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.25);
+}
+
+.tab-button:active {
+  padding-top: 5px;
+  padding-bottom: 3px;
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.25);
 }
 
 :root[data-theme="light"] .tab-group {
@@ -1203,6 +1229,15 @@ button {
   box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.3);
 }
 
+button:active:not(:disabled) {
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.2);
+}
+
+.competition-toggle:active:not(:disabled) {
+  padding-top: 8px;
+  padding-bottom: 6px;
+}
+
 button.primary {
   background: linear-gradient(135deg, #ffd166, #ff9f43);
   color: #1b1c24;
@@ -1258,12 +1293,17 @@ button.icon-button {
   width: 30px;
   height: 30px;
   padding: 0;
+  box-sizing: border-box;
   border-radius: 10px;
   background: rgba(12, 18, 32, 0.7);
   color: var(--text);
   border: 2px solid var(--stroke);
   font-size: 14px;
   line-height: 1;
+}
+
+button.icon-button:active:not(:disabled) {
+  padding-top: 2px;
 }
 
 button.icon-button.ghost-button {
@@ -1289,6 +1329,10 @@ button.icon-button.small {
   width: 22px;
   height: 22px;
   font-size: 12px;
+}
+
+button.icon-button.small:active:not(:disabled) {
+  padding-top: 1px;
 }
 
 :root[data-theme="light"] button.icon-button {
@@ -1347,6 +1391,34 @@ button.icon-button.small {
 }
 
 @media (max-width: 420px) {
+  .league-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .league-actions {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .league-actions .tab-group {
+    flex-shrink: 0;
+  }
+
+  .competition-toggle {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    padding: 5px 8px;
+  }
+
+  .competition-toggle:active:not(:disabled) {
+    padding-top: 6px;
+    padding-bottom: 4px;
+  }
+
   .league-grid {
     grid-template-columns: 1fr;
   }

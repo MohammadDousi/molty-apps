@@ -49,6 +49,7 @@ export type UserRepository = {
       id: number;
       wakawarsUsername: string;
       statsVisibility: StatsVisibility;
+      isCompeting: boolean;
       wakatimeTimezone?: string | null;
     }>
   >;
@@ -62,6 +63,7 @@ export type UserRepository = {
   setWakaTimeTimezone: (userId: number, timeZone: string) => Promise<UserConfig>;
   setPassword: (userId: number, passwordHash: string | null) => Promise<UserConfig>;
   setStatsVisibility: (userId: number, visibility: StatsVisibility) => Promise<UserConfig>;
+  setCompetitionStatus: (userId: number, isCompeting: boolean) => Promise<UserConfig>;
   addFriendship: (userId: number, friendId: number) => Promise<UserConfig>;
   removeFriendship: (userId: number, friendId: number) => Promise<UserConfig>;
   createGroup: (userId: number, name: string) => Promise<UserConfig>;
@@ -113,6 +115,7 @@ type PrismaUser = {
   wakatime_timezone: string | null;
   password_hash: string | null;
   stats_visibility: StatsVisibility;
+  is_competing: boolean;
   friendships: Array<{
     friend_id: number;
     friend: {
@@ -140,6 +143,7 @@ const mapUserToConfig = (user: PrismaUser): UserConfig => ({
   apiKey: user.api_key,
   wakatimeTimezone: user.wakatime_timezone ?? null,
   statsVisibility: user.stats_visibility,
+  isCompeting: user.is_competing,
   passwordHash: user.password_hash,
   friends: user.friendships.map((friendship) => ({
     id: friendship.friend_id,
@@ -203,6 +207,7 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
         id: true,
         wakawars_username: true,
         stats_visibility: true,
+        is_competing: true,
         wakatime_timezone: true
       }
     });
@@ -211,6 +216,7 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
       id: user.id,
       wakawarsUsername: user.wakawars_username,
       statsVisibility: user.stats_visibility as StatsVisibility,
+      isCompeting: Boolean(user.is_competing),
       wakatimeTimezone: user.wakatime_timezone ?? null
     }));
   };
@@ -302,6 +308,16 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     const user = await prisma.ww_user.update({
       where: { id: userId },
       data: { stats_visibility: visibility },
+      include: userInclude
+    });
+
+    return mapUserToConfig(user as PrismaUser);
+  };
+
+  const setCompetitionStatus = async (userId: number, isCompeting: boolean) => {
+    const user = await prisma.ww_user.update({
+      where: { id: userId },
+      data: { is_competing: isCompeting },
       include: userInclude
     });
 
@@ -723,6 +739,7 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     setWakaTimeTimezone,
     setPassword,
     setStatsVisibility,
+    setCompetitionStatus,
     addFriendship,
     removeFriendship,
     createGroup,

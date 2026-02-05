@@ -55,6 +55,7 @@ const toPublicConfig = (config: UserConfig): PublicConfig => ({
     })),
   })),
   statsVisibility: config.statsVisibility,
+  isCompeting: config.isCompeting,
   hasApiKey: Boolean(config.apiKey),
   passwordSet: Boolean(config.passwordHash),
 });
@@ -183,8 +184,10 @@ export const createServer = ({
     const incomingFriendIds = new Set(
       await store.getIncomingFriendIds(config.id, userIds)
     );
-    const stats: DailyStat[] = users.map((user) => {
-      const isSelf = user.id === config.id;
+    const buildDailyStat = (
+      user: (typeof users)[number],
+      isSelf: boolean
+    ): DailyStat => {
       const stat = statsByUserId.get(user.id);
       const isMutualFriend =
         friendIds.has(user.id) && incomingFriendIds.has(user.id);
@@ -217,9 +220,33 @@ export const createServer = ({
         status: stat.status,
         error: stat.error ?? null,
       };
-    });
+    };
 
-    const entries = computeLeaderboard(stats, config.wakawarsUsername);
+    const selfUser = users.find((user) => user.id === config.id) ?? null;
+    const selfStat = selfUser ? buildDailyStat(selfUser, true) : null;
+    const leaderboardUsers = users.filter((user) => user.isCompeting);
+    const stats: DailyStat[] = leaderboardUsers.map((user) =>
+      buildDailyStat(user, user.id === config.id)
+    );
+
+    const computedEntries = computeLeaderboard(stats, config.wakawarsUsername);
+    const selfSeconds = selfStat?.totalSeconds ?? null;
+    const entries =
+      selfSeconds === null
+        ? computedEntries
+        : computedEntries.map((entry) => ({
+            ...entry,
+            deltaSeconds: entry.totalSeconds - selfSeconds,
+          }));
+    const selfEntry =
+      entries.find((entry) => entry.username === config.wakawarsUsername) ??
+      (selfStat
+        ? {
+            ...selfStat,
+            rank: null,
+            deltaSeconds: 0,
+          }
+        : null);
     const updatedAtEpoch = dailyStats.length
       ? Math.max(...dailyStats.map((stat) => stat.fetchedAt.getTime()))
       : Date.now();
@@ -228,6 +255,7 @@ export const createServer = ({
       date: resolveDateKeyForUser(config, offsetDays, baseDate),
       updatedAt: new Date(updatedAtEpoch).toISOString(),
       entries,
+      selfEntry,
     };
 
     return response;
@@ -437,6 +465,27 @@ export const createServer = ({
                 t.Literal("friends"),
                 t.Literal("no_one"),
               ]),
+            }),
+          }
+        )
+        .post(
+          "/competition",
+          async ({ body, headers, set }) => {
+            const authCheck = await requireSession(headers, set);
+            if (!authCheck.ok) {
+              return { error: "Unauthorized" };
+            }
+
+            const updated = await store.setCompetitionStatus(
+              authCheck.user.id,
+              body.isCompeting
+            );
+
+            return toPublicConfig(updated);
+          },
+          {
+            body: t.Object({
+              isCompeting: t.Boolean(),
             }),
           }
         )
@@ -781,8 +830,10 @@ export const createServer = ({
           const incomingFriendIds = new Set(
             await store.getIncomingFriendIds(config.id, userIds)
           );
-          const stats: WeeklyStat[] = users.map((user) => {
-            const isSelf = user.id === config.id;
+          const buildWeeklyStat = (
+            user: (typeof users)[number],
+            isSelf: boolean
+          ): WeeklyStat => {
             const stat = statsByUserId.get(user.id);
             const isMutualFriend =
               friendIds.has(user.id) && incomingFriendIds.has(user.id);
@@ -818,9 +869,35 @@ export const createServer = ({
               status: stat.status,
               error: stat.error ?? null,
             };
-          });
+          };
 
-          const entries = computeLeaderboard(stats, config.wakawarsUsername);
+          const selfUser = users.find((user) => user.id === config.id) ?? null;
+          const selfStat = selfUser ? buildWeeklyStat(selfUser, true) : null;
+          const leaderboardUsers = users.filter((user) => user.isCompeting);
+          const stats: WeeklyStat[] = leaderboardUsers.map((user) =>
+            buildWeeklyStat(user, user.id === config.id)
+          );
+
+          const computedEntries = computeLeaderboard(stats, config.wakawarsUsername);
+          const selfSeconds = selfStat?.totalSeconds ?? null;
+          const entries =
+            selfSeconds === null
+              ? computedEntries
+              : computedEntries.map((entry) => ({
+                  ...entry,
+                  deltaSeconds: entry.totalSeconds - selfSeconds,
+                }));
+          const selfEntry =
+            entries.find(
+              (entry) => entry.username === config.wakawarsUsername
+            ) ??
+            (selfStat
+              ? {
+                  ...selfStat,
+                  rank: null,
+                  deltaSeconds: 0,
+                }
+              : null);
           const updatedAtEpoch = weeklyStats.length
             ? Math.max(...weeklyStats.map((stat) => stat.result.fetchedAt))
             : Date.now();
@@ -829,6 +906,7 @@ export const createServer = ({
             range: rangeKey,
             updatedAt: new Date(updatedAtEpoch).toISOString(),
             entries,
+            selfEntry,
           };
 
           return response;

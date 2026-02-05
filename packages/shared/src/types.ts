@@ -9,6 +9,7 @@ export type FriendPublic = {
 };
 
 export type StatsVisibility = "everyone" | "friends" | "no_one";
+export type CompetitionStatus = "active" | "left";
 
 export type GroupMember = {
   id: number;
@@ -29,6 +30,7 @@ export type UserConfig = {
   friends: Friend[];
   groups: Group[];
   statsVisibility: StatsVisibility;
+  isCompeting: boolean;
   passwordHash?: string | null;
 };
 
@@ -37,6 +39,7 @@ export type PublicConfig = {
   friends: FriendPublic[];
   groups: Group[];
   statsVisibility: StatsVisibility;
+  isCompeting: boolean;
   hasApiKey: boolean;
   passwordSet: boolean;
 };
@@ -59,6 +62,7 @@ export type LeaderboardResponse = {
   date: string;
   updatedAt: string;
   entries: LeaderboardEntry[];
+  selfEntry?: LeaderboardEntry | null;
 };
 
 export type WeeklyStat = {
@@ -78,4 +82,5 @@ export type WeeklyLeaderboardResponse = {
   range: string;
   updatedAt: string;
   entries: WeeklyLeaderboardEntry[];
+  selfEntry?: WeeklyLeaderboardEntry | null;
 };

@@ -14,6 +14,7 @@ model ww_user {
   wakatime_timezone String?
   password_hash     String?
   stats_visibility  ww_stats_visibility @default(everyone)
+  is_competing      Boolean         @default(true)
   friendships       ww_friendship[] @relation("user_friendships")
   friend_of         ww_friendship[] @relation("friend_friendships")
   groups_owned      ww_group[]      @relation("group_owner")

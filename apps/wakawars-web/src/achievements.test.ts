@@ -13,6 +13,7 @@ describe("buildAchievements", () => {
       friends: [{ username: "bob" }],
       groups: [{ id: 1, name: "Alpha", members: [] }],
       statsVisibility: "everyone",
+      isCompeting: true,
       hasApiKey: true,
       passwordSet: true,
     };

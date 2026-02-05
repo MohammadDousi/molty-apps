@@ -81,6 +81,7 @@ const createMemoryRepository = (): UserRepository => {
           id: user.id,
           wakawarsUsername: user.wakawarsUsername,
           statsVisibility: user.statsVisibility,
+          isCompeting: user.isCompeting,
           wakatimeTimezone: user.wakatimeTimezone ?? null
         })),
     getUserById: async (userId) => {
@@ -98,7 +99,8 @@ const createMemoryRepository = (): UserRepository => {
         apiKey,
         wakatimeTimezone: null,
         passwordHash: null,
-        statsVisibility: "everyone"
+        statsVisibility: "everyone",
+        isCompeting: true
       };
       users = [...users, user];
       return withRelations(user);
@@ -125,6 +127,13 @@ const createMemoryRepository = (): UserRepository => {
     setStatsVisibility: async (userId, statsVisibility) => {
       users = users.map((user) =>
         user.id === userId ? { ...user, statsVisibility } : user
+      );
+      const updated = findUser((entry) => entry.id === userId);
+      return withRelations(updated!);
+    },
+    setCompetitionStatus: async (userId, isCompeting) => {
+      users = users.map((user) =>
+        user.id === userId ? { ...user, isCompeting } : user
       );
       const updated = findUser((entry) => entry.id === userId);
       return withRelations(updated!);
