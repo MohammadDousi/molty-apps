@@ -1,6 +1,7 @@
 import type { UserRepository } from "./repository.js";
 import type { WakaTimeClient } from "./wakatime.js";
 import { toDateKeyInTimeZone } from "./date-key.js";
+import { awardDailyAchievements } from "./achievements.js";
 import {
   DEFAULT_WAKATIME_BATCH_DELAY_MS,
   DEFAULT_WAKATIME_BATCH_SIZE,
@@ -95,7 +96,7 @@ export const createWakaTimeSync = ({
             fetchedAt: new Date(dailyResult.fetchedAt)
           });
 
-          const logTasks: Promise<void>[] = [];
+          const logTasks: Promise<unknown>[] = [];
           if (dailyResult.timezone && dailyResult.timezone !== user.wakatimeTimezone) {
             logTasks.push(store.setWakaTimeTimezone(user.id, dailyResult.timezone));
           }
@@ -113,6 +114,16 @@ export const createWakaTimeSync = ({
               fetchedAt: new Date(dailyResult.fetchedAt)
             });
           }
+
+          await awardDailyAchievements({
+            store,
+            userId: user.id,
+            dateKey,
+            status: dailyResult.status,
+            totalSeconds: dailyResult.totalSeconds,
+            payload: dailyResult.payload,
+            fetchedAt: new Date(dailyResult.fetchedAt)
+          });
 
           if (logTasks.length) {
             await Promise.allSettled(logTasks);
@@ -169,7 +180,7 @@ export const createWakaTimeSync = ({
         fetchedAt: new Date(dailyResult.fetchedAt)
       });
 
-      const logTasks: Promise<void>[] = [];
+      const logTasks: Promise<unknown>[] = [];
       if (dailyResult.timezone && dailyResult.timezone !== wakatimeTimezone) {
         logTasks.push(store.setWakaTimeTimezone(id, dailyResult.timezone));
       }
@@ -187,6 +198,16 @@ export const createWakaTimeSync = ({
           fetchedAt: new Date(dailyResult.fetchedAt)
         });
       }
+
+      await awardDailyAchievements({
+        store,
+        userId: id,
+        dateKey,
+        status: dailyResult.status,
+        totalSeconds: dailyResult.totalSeconds,
+        payload: dailyResult.payload,
+        fetchedAt: new Date(dailyResult.fetchedAt)
+      });
 
       if (logTasks.length) {
         await Promise.allSettled(logTasks);

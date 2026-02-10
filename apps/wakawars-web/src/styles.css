@@ -739,6 +739,130 @@ h3 {
   color: var(--muted);
 }
 
+.achievement-page {
+  gap: 12px;
+}
+
+.achievement-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.summary-chip {
+  border-radius: 12px;
+  border: 2px solid var(--stroke);
+  background: rgba(12, 18, 32, 0.72);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+:root[data-theme="light"] .summary-chip {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.summary-chip-label {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.achievement-catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.achievement-catalog-card {
+  border-radius: 14px;
+  border: 2px solid var(--stroke);
+  background: rgba(12, 18, 32, 0.72);
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 8px;
+}
+
+:root[data-theme="light"] .achievement-catalog-card {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.achievement-catalog-card.unlocked {
+  background: linear-gradient(
+    150deg,
+    rgba(255, 209, 102, 0.2),
+    rgba(12, 18, 32, 0.8)
+  );
+}
+
+:root[data-theme="light"] .achievement-catalog-card.unlocked {
+  background: linear-gradient(
+    150deg,
+    rgba(246, 168, 0, 0.2),
+    rgba(255, 255, 255, 0.96)
+  );
+}
+
+.achievement-catalog-card.locked {
+  opacity: 0.68;
+}
+
+.achievement-catalog-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 2px solid var(--stroke);
+  background: rgba(255, 209, 102, 0.25);
+  display: grid;
+  place-items: center;
+  color: #1b1c24;
+  font-size: 10px;
+  font-family: var(--font-display);
+}
+
+.achievement-catalog-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.achievement-catalog-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.achievement-catalog-title {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.achievement-catalog-count {
+  font-size: 10px;
+  font-family: var(--font-display);
+  color: var(--accent);
+}
+
+.achievement-catalog-desc {
+  margin: 0;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.achievement-catalog-meta {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
 .row-item {
   display: flex;
   flex-direction: row;
@@ -815,6 +939,28 @@ h3 {
   font-weight: 600;
   font-size: 14px;
   text-align: left;
+}
+
+.username-trigger {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  color: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+  font-family: var(--font-body);
+  font-size: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.username-trigger:hover,
+.username-trigger:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+  outline: none;
 }
 
 .badge {
@@ -1067,6 +1213,29 @@ input[type="password"]::placeholder {
   justify-content: flex-end;
   margin-left: auto;
   flex-shrink: 0;
+}
+
+.settings-achievement-catalog {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-achievement-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-achievement-head h3 {
+  margin: 0;
+  font-size: 12px;
+}
+
+.settings-achievement-grid {
+  grid-template-columns: 1fr;
 }
 
 .visibility-grid {
@@ -1390,6 +1559,110 @@ button.icon-button.small:active:not(:disabled) {
   animation: shimmer 1.6s ease infinite;
 }
 
+.achievement-hover-modal {
+  position: fixed;
+  top: 78px;
+  right: 14px;
+  width: min(360px, calc(100vw - 28px));
+  max-height: 70vh;
+  overflow: auto;
+  z-index: 40;
+  border-radius: 16px;
+  border: 2px solid var(--stroke);
+  background: var(--panel-strong);
+  box-shadow: var(--shadow-strong);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.achievement-hover-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.achievement-hover-head h3 {
+  font-size: 14px;
+}
+
+.achievement-hover-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.achievement-hover-item {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 8px;
+  border-radius: 12px;
+  border: 2px solid var(--stroke);
+  background: rgba(12, 18, 32, 0.72);
+  padding: 8px;
+}
+
+:root[data-theme="light"] .achievement-hover-item {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.achievement-hover-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 2px solid var(--stroke);
+  background: rgba(255, 209, 102, 0.25);
+  display: grid;
+  place-items: center;
+  color: #1b1c24;
+  font-family: var(--font-display);
+  font-size: 10px;
+}
+
+.achievement-hover-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.achievement-hover-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.achievement-hover-title {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.achievement-hover-count {
+  font-size: 10px;
+  font-family: var(--font-display);
+  color: var(--accent);
+}
+
+.achievement-hover-desc {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.achievement-hover-meta {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.achievement-hover-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 @media (max-width: 420px) {
   .league-header {
     flex-direction: column;
@@ -1430,6 +1703,21 @@ button.icon-button.small:active:not(:disabled) {
   .achievement-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .achievement-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .achievement-catalog-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .achievement-hover-modal {
+    top: auto;
+    bottom: 12px;
+    right: 12px;
+    max-height: 60vh;
+  }
 }
 
 @keyframes shimmer {
@@ -1462,5 +1750,9 @@ button.icon-button.small:active:not(:disabled) {
 @media (max-width: 360px) {
   .achievement-grid {
     grid-template-columns: 1fr;
+  }
+
+  .achievement-catalog-card {
+    grid-template-columns: 34px minmax(0, 1fr);
   }
 }

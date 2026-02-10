@@ -22,6 +22,7 @@ model ww_user {
   sessions          ww_session[]
   daily_stats       ww_daily_stat[]
   weekly_stats      ww_weekly_stat[]
+  achievements      ww_user_achievement[]
   provider_logs     ww_provider_log[]
   created_at        DateTime        @default(now())
   updated_at        DateTime        @updatedAt
@@ -112,6 +113,28 @@ model ww_weekly_stat {
 
   @@unique([user_id, range_key])
   @@index([range_key])
+}
+
+enum ww_achievement_context_kind {
+  daily
+  weekly
+}
+
+model ww_user_achievement {
+  id              Int                         @id @default(autoincrement())
+  user_id         Int
+  user            ww_user                     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  achievement_key String
+  context_kind    ww_achievement_context_kind
+  context_key     String
+  metadata        Json?
+  awarded_at      DateTime
+  created_at      DateTime                    @default(now())
+  updated_at      DateTime                    @updatedAt
+
+  @@unique([user_id, achievement_key, context_kind, context_key])
+  @@index([user_id, awarded_at])
+  @@index([achievement_key])
 }
 
 model ww_provider_log {

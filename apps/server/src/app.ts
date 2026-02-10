@@ -26,6 +26,11 @@ import {
   createPrismaSessionStore,
   type SessionStore,
 } from "./session-store.js";
+import {
+  ACHIEVEMENT_DEFINITIONS,
+  toAchievementBoard,
+  toAchievementDisplay,
+} from "./achievements.js";
 
 export type ServerOptions = {
   port: number;
@@ -114,7 +119,7 @@ export const createServer = ({
 
   const requireSession = async (
     headers: Record<string, string | undefined>,
-    set: { status: number }
+    set: { status?: number | string }
   ) => {
     const token = headers["x-wakawars-session"];
     if (!token) {
@@ -259,6 +264,39 @@ export const createServer = ({
     };
 
     return response;
+  };
+
+  const canViewUserStats = async ({
+    viewer,
+    target,
+  }: {
+    viewer: UserConfig;
+    target: UserConfig;
+  }): Promise<boolean> => {
+    if (viewer.id === target.id) {
+      return true;
+    }
+
+    if (target.statsVisibility === "everyone") {
+      return true;
+    }
+
+    if (target.statsVisibility === "no_one") {
+      return false;
+    }
+
+    const friendIds = new Set(viewer.friends.map((friend) => friend.id));
+    const incomingFriendIds = new Set(
+      await store.getIncomingFriendIds(viewer.id, [target.id])
+    );
+    const isMutualFriend =
+      friendIds.has(target.id) && incomingFriendIds.has(target.id);
+    if (isMutualFriend) {
+      return true;
+    }
+
+    const groupPeerIds = new Set(await store.getGroupPeerIds(viewer.id));
+    return groupPeerIds.has(target.id);
   };
 
   const app = new Elysia({ adapter: node() })
@@ -510,6 +548,82 @@ export const createServer = ({
           {
             query: t.Object({
               q: t.String(),
+            }),
+          }
+        )
+        .get(
+          "/achievements",
+          async ({ headers, set }) => {
+            const authCheck = await requireSession(headers, set);
+            if (!authCheck.ok) {
+              return { error: "Unauthorized" };
+            }
+
+            const unlocks = await store.listAchievementUnlocks({
+              userId: authCheck.user.id,
+            });
+            const totalUnlocks = unlocks.reduce(
+              (sum, achievement) => sum + achievement.count,
+              0
+            );
+            const achievements = toAchievementBoard(unlocks);
+
+            return {
+              username: authCheck.user.wakawarsUsername,
+              totalUnlocks,
+              unlockedCount: unlocks.length,
+              totalDefined: ACHIEVEMENT_DEFINITIONS.length,
+              achievements,
+            };
+          }
+        )
+        .get(
+          "/achievements/:username",
+          async ({ params, headers, set }) => {
+            const authCheck = await requireSession(headers, set);
+            if (!authCheck.ok) {
+              return { error: "Unauthorized" };
+            }
+
+            const username = normalizeUsername(params.username);
+            if (!username) {
+              set.status = 400;
+              return { error: "Username is required" };
+            }
+
+            const target = await store.getUserByUsername(username);
+            if (!target) {
+              set.status = 404;
+              return { error: "User not found" };
+            }
+
+            const canView = await canViewUserStats({
+              viewer: authCheck.user,
+              target,
+            });
+            if (!canView) {
+              set.status = 403;
+              return { error: "Achievements are private" };
+            }
+
+            const unlocks = await store.listAchievementUnlocks({
+              userId: target.id,
+            });
+            const achievements = toAchievementDisplay(unlocks);
+            const totalUnlocks = achievements.reduce(
+              (sum, achievement) => sum + achievement.count,
+              0
+            );
+
+            return {
+              username: target.wakawarsUsername,
+              totalUnlocks,
+              achievements,
+            };
+          },
+          {
+            params: t.Object({
+              username: t.String(),
             }),
           }
         )

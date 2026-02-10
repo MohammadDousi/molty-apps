@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 import type { DailyStatStatus, StatsVisibility, UserConfig } from "@molty/shared";
 
@@ -30,6 +31,24 @@ export type ProviderLogRecord = {
   payload?: unknown | null;
   error?: string | null;
   fetchedAt: Date;
+};
+
+export type AchievementContextKind = "daily" | "weekly";
+
+export type AchievementGrantRecord = {
+  userId: number;
+  achievementId: string;
+  contextKind: AchievementContextKind;
+  contextKey: string;
+  awardedAt: Date;
+  metadata?: unknown | null;
+};
+
+export type AchievementUnlockSummary = {
+  achievementId: string;
+  count: number;
+  firstAwardedAt: Date;
+  lastAwardedAt: Date;
 };
 
 export type UserRepository = {
@@ -105,6 +124,10 @@ export type UserRepository = {
     userIds: number[];
     rangeKey: string;
   }) => Promise<WeeklyStatRecord[]>;
+  grantAchievement: (input: AchievementGrantRecord) => Promise<void>;
+  listAchievementUnlocks: (input: {
+    userId: number;
+  }) => Promise<AchievementUnlockSummary[]>;
   createProviderLog: (input: ProviderLogRecord) => Promise<void>;
 };
 
@@ -702,6 +725,79 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     }));
   };
 
+  const grantAchievement = async ({
+    userId,
+    achievementId,
+    contextKind,
+    contextKey,
+    awardedAt,
+    metadata
+  }: AchievementGrantRecord) => {
+    await prisma.ww_user_achievement.upsert({
+      where: {
+        user_id_achievement_key_context_kind_context_key: {
+          user_id: userId,
+          achievement_key: achievementId,
+          context_kind: contextKind,
+          context_key: contextKey
+        }
+      },
+      create: {
+        user_id: userId,
+        achievement_key: achievementId,
+        context_kind: contextKind,
+        context_key: contextKey,
+        awarded_at: awardedAt,
+        metadata:
+          metadata === undefined
+            ? undefined
+            : metadata === null
+              ? Prisma.DbNull
+              : (metadata as Prisma.InputJsonValue)
+      },
+      update: {
+        awarded_at: awardedAt,
+        metadata:
+          metadata === undefined
+            ? undefined
+            : metadata === null
+              ? Prisma.DbNull
+              : (metadata as Prisma.InputJsonValue)
+      }
+    });
+  };
+
+  const listAchievementUnlocks = async ({
+    userId
+  }: {
+    userId: number;
+  }): Promise<AchievementUnlockSummary[]> => {
+    const rows = await prisma.ww_user_achievement.groupBy({
+      by: ["achievement_key"],
+      where: { user_id: userId },
+      _count: {
+        _all: true
+      },
+      _min: {
+        awarded_at: true
+      },
+      _max: {
+        awarded_at: true
+      }
+    });
+
+    return rows
+      .map((row) => ({
+        achievementId: row.achievement_key,
+        count: row._count._all,
+        firstAwardedAt: row._min.awarded_at ?? new Date(0),
+        lastAwardedAt: row._max.awarded_at ?? new Date(0)
+      }))
+      .sort(
+        (a, b) => b.lastAwardedAt.getTime() - a.lastAwardedAt.getTime()
+      );
+  };
+
   const createProviderLog = async ({
     provider,
     userId,
@@ -721,7 +817,12 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
         range_key: rangeKey ?? null,
         status_code: statusCode ?? null,
         ok,
-        payload: payload ?? null,
+        payload:
+          payload === undefined
+            ? undefined
+            : payload === null
+              ? Prisma.DbNull
+              : (payload as Prisma.InputJsonValue),
         error: error ?? null,
         fetched_at: fetchedAt
       }
@@ -754,6 +855,8 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     getDailyStats,
     upsertWeeklyStat,
     getWeeklyStats,
+    grantAchievement,
+    listAchievementUnlocks,
     createProviderLog
   };
 };
