@@ -47,7 +47,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@molty/shared": path.resolve(__dirname, "../../packages/shared/dist")
+      "@molty/shared": path.resolve(__dirname, "../../packages/shared/dist/index.js")
     }
   },
   build: {

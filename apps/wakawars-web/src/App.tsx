@@ -4,8 +4,10 @@ import {
   useMemo,
   useState,
   useRef,
+  type KeyboardEvent as ReactKeyboardEvent,
   type CSSProperties,
   type FormEvent,
+  type RefObject,
 } from "react";
 import {
   formatDuration,
@@ -17,12 +19,6 @@ import {
   type WeeklyLeaderboardEntry,
   type WeeklyLeaderboardResponse,
 } from "@molty/shared";
-import {
-  buildAchievements,
-  buildQuests,
-  type Achievement,
-  type Quest,
-} from "./achievements";
 
 const logoUrl = new URL("./assets/logo.svg", import.meta.url).toString();
 const logoMaskStyle = { "--logo-mask": `url(${logoUrl})` } as CSSProperties;
@@ -42,6 +38,83 @@ type SessionState = {
 type VersionPayload = {
   version?: string;
   buildTime?: string;
+};
+
+type UserAchievement = {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  count: number;
+  firstAwardedAt: string;
+  lastAwardedAt: string;
+};
+
+type UserAchievementsPayload = {
+  username: string;
+  totalUnlocks: number;
+  achievements: UserAchievement[];
+};
+
+type AchievementCatalogItem = {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  count: number;
+  unlocked: boolean;
+  firstAwardedAt: string | null;
+  lastAwardedAt: string | null;
+};
+
+type AchievementCatalogPayload = {
+  username: string;
+  totalUnlocks: number;
+  unlockedCount: number;
+  totalDefined: number;
+  achievements: AchievementCatalogItem[];
+};
+
+type AchievementRarity = "common" | "rare" | "epic" | "legendary";
+
+const COMMON_ACHIEVEMENT_IDS = new Set([
+  "quick-boot-4h",
+  "focus-reactor-6h",
+  "weekend-warrior-8h",
+  "workweek-warrior-40h",
+  "seven-sunrise-week",
+]);
+
+const EPIC_ACHIEVEMENT_IDS = new Set([
+  "merge-mountain-12h",
+  "night-shift-14h",
+  "switchblade-day-8h",
+  "language-juggler-day-8h",
+  "green-wall-80h",
+  "polyglot-stack-80h",
+  "language-hydra-80h",
+  "project-monolith-80h",
+  "project-nomad-80h",
+  "iron-week-4h",
+]);
+
+const LEGENDARY_ACHIEVEMENT_IDS = new Set([
+  "legendary-commit-16h",
+  "boss-raid-20h",
+  "graph-overflow-100h",
+  "matrix-120h",
+  "mono-stack-80h",
+  "mono-stack-100h",
+  "language-spectrum-80h",
+  "editor-arsenal-80h",
+  "ultra-pace-10h",
+]);
+
+const getAchievementRarity = (achievementId: string): AchievementRarity => {
+  if (LEGENDARY_ACHIEVEMENT_IDS.has(achievementId)) return "legendary";
+  if (EPIC_ACHIEVEMENT_IDS.has(achievementId)) return "epic";
+  if (COMMON_ACHIEVEMENT_IDS.has(achievementId)) return "common";
+  return "rare";
 };
 
 type AddFriendCardProps = {
@@ -136,7 +209,9 @@ const App = () => {
   const [groupMemberInputs, setGroupMemberInputs] = useState<
     Record<number, string>
   >({});
-  const [activeTab, setActiveTab] = useState<"league" | "settings">("league");
+  const [activeTab, setActiveTab] = useState<
+    "league" | "achievements" | "settings"
+  >("league");
   const [activeLeagueTab, setActiveLeagueTab] = useState<"today" | "weekly">(
     "today"
   );
@@ -175,6 +250,20 @@ const App = () => {
     if (stored === "false") return false;
     return false;
   });
+  const [hoveredUsername, setHoveredUsername] = useState<string | null>(null);
+  const [userAchievements, setUserAchievements] = useState<
+    Record<
+      string,
+      { loading: boolean; data: UserAchievementsPayload | null; error: string | null }
+    >
+  >({});
+  const [achievementCatalog, setAchievementCatalog] =
+    useState<AchievementCatalogPayload | null>(null);
+  const [achievementCatalogLoading, setAchievementCatalogLoading] =
+    useState(false);
+  const [achievementCatalogError, setAchievementCatalogError] = useState<
+    string | null
+  >(null);
 
   const isAuthenticated = Boolean(session?.authenticated);
   const isConfigured = Boolean(config?.wakawarsUsername && config?.hasApiKey);
@@ -190,6 +279,7 @@ const App = () => {
   const competitionRequestAbortRef = useRef<AbortController | null>(null);
   const competitionDebounceRef = useRef<number | null>(null);
   const competitionRequestIdRef = useRef(0);
+  const achievementsModalRef = useRef<HTMLElement | null>(null);
   const competitionRollbackRef = useRef<{
     previousConfig: PublicConfig | null;
     previousStats: LeaderboardResponse | null;
@@ -987,6 +1077,139 @@ const App = () => {
     shouldIncludeWeekly,
   ]);
 
+  const loadAchievementCatalog = useCallback(
+    async (force = false) => {
+      if (!isAuthenticated || !isConfigured) return;
+      if (achievementCatalogLoading) return;
+      if (achievementCatalog && !force) return;
+
+      setAchievementCatalogLoading(true);
+      setAchievementCatalogError(null);
+      try {
+        const payload = await request<AchievementCatalogPayload>("/achievements");
+        setAchievementCatalog(payload);
+      } catch (err) {
+        setAchievementCatalogError(
+          err instanceof Error ? err.message : "Failed to load achievements"
+        );
+      } finally {
+        setAchievementCatalogLoading(false);
+      }
+    },
+    [
+      isAuthenticated,
+      isConfigured,
+      achievementCatalogLoading,
+      achievementCatalog,
+      request,
+    ]
+  );
+
+  const openAchievementsPage = useCallback(() => {
+    setActiveTab("achievements");
+    void loadAchievementCatalog(false);
+  }, [loadAchievementCatalog]);
+
+  const fetchUserAchievements = useCallback(
+    async (username: string, force = false) => {
+      const normalized = username.trim().toLowerCase();
+      if (!normalized) return;
+
+      const existing = userAchievements[normalized];
+      if (!force && (existing?.loading || existing?.data)) return;
+
+      setUserAchievements((prev) => ({
+        ...prev,
+        [normalized]: {
+          loading: true,
+          data: prev[normalized]?.data ?? null,
+          error: null,
+        },
+      }));
+
+      try {
+        const payload = await request<UserAchievementsPayload>(
+          `/achievements/${encodeURIComponent(normalized)}`
+        );
+        setUserAchievements((prev) => ({
+          ...prev,
+          [normalized]: {
+            loading: false,
+            data: payload,
+            error: null,
+          },
+        }));
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to load achievements";
+        setUserAchievements((prev) => ({
+          ...prev,
+          [normalized]: {
+            loading: false,
+            data: prev[normalized]?.data ?? null,
+            error: message,
+          },
+        }));
+      }
+    },
+    [request, userAchievements]
+  );
+
+  const handleRowSelect = useCallback(
+    (username: string) => {
+      const normalized = username.trim().toLowerCase();
+      if (!normalized) return;
+      setHoveredUsername(normalized);
+      void fetchUserAchievements(normalized);
+    },
+    [fetchUserAchievements]
+  );
+
+  useEffect(() => {
+    if (isAuthenticated) return;
+    setHoveredUsername(null);
+    setUserAchievements({});
+    setAchievementCatalog(null);
+    setAchievementCatalogError(null);
+    setAchievementCatalogLoading(false);
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (activeTab === "league") return;
+    setHoveredUsername(null);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "achievements") return;
+    void loadAchievementCatalog(false);
+  }, [activeTab, loadAchievementCatalog]);
+
+  useEffect(() => {
+    if (!hoveredUsername) return;
+
+    const onDocumentMouseDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (achievementsModalRef.current?.contains(target)) return;
+      if (target.closest(".row-item-trigger")) return;
+      setHoveredUsername(null);
+    };
+
+    const onDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setHoveredUsername(null);
+      }
+    };
+
+    document.addEventListener("mousedown", onDocumentMouseDown);
+    document.addEventListener("keydown", onDocumentKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", onDocumentMouseDown);
+      document.removeEventListener("keydown", onDocumentKeyDown);
+    };
+  }, [hoveredUsername]);
+
   useEffect(() => {
     if (!config || competitionState === null) return;
     if (competitionState === config.isCompeting) {
@@ -1178,40 +1401,46 @@ const App = () => {
     activeSelfEntry,
     activeInsertIndex,
   ]);
+  const hoveredAchievementsState = hoveredUsername
+    ? userAchievements[hoveredUsername] ?? {
+        loading: true,
+        data: null,
+        error: null,
+      }
+    : null;
+  const showHoverModal =
+    Boolean(hoveredUsername) && activeTab === "league" && !showMainLoading;
+  const achievementCatalogEntries = useMemo(() => {
+    const entries = achievementCatalog?.achievements ?? [];
+    return [...entries].sort((a, b) => {
+      if (a.unlocked !== b.unlocked) {
+        return a.unlocked ? -1 : 1;
+      }
+      if (a.count !== b.count) {
+        return b.count - a.count;
+      }
+      return a.title.localeCompare(b.title);
+    });
+  }, [achievementCatalog?.achievements]);
 
   useEffect(() => {
     if (!window.molty?.setTrayTitle) return;
     void window.molty.setTrayTitle(menuBarTitle);
   }, [menuBarTitle]);
 
-  const achievements = useMemo(
-    () =>
-      buildAchievements({
-        config,
-        dailyEntry: selfDailyEntry,
-        weeklyEntry: selfWeeklyEntry,
-      }),
-    [config, selfDailyEntry, selfWeeklyEntry]
-  );
-
-  const quests = useMemo(
-    () =>
-      buildQuests({
-        dailyEntry: selfDailyEntry,
-        weeklyEntry: selfWeeklyEntry,
-      }),
-    [selfDailyEntry, selfWeeklyEntry]
-  );
-
   const showLogin = Boolean(session?.hasUser && !session?.authenticated);
   const showAuth = !isAuthenticated;
   const showWelcome = showAuth && authView === "welcome";
   const showSignIn = showAuth && authView === "signin";
   const showSignUp = showAuth && authView === "signup";
-  const canShowSettings = Boolean(isConfigured && isAuthenticated);
-  const showSettings = Boolean(canShowSettings && activeTab === "settings");
+  const canShowControlTabs = Boolean(isConfigured && isAuthenticated);
+  const showAchievements = Boolean(
+    canShowControlTabs && activeTab === "achievements"
+  );
+  const showSettings = Boolean(canShowControlTabs && activeTab === "settings");
   const passwordActionLabel = "Set password";
   const headerSubtitle = useMemo(() => {
+    if (showAchievements) return "Trophy vault";
     if (showSettings) return "War room";
     if (showAuth) {
       if (authView === "signin") return "Sign in";
@@ -1219,9 +1448,13 @@ const App = () => {
       return "Welcome";
     }
     return activeLeagueTab === "weekly" ? "Weekly clash" : "Daily arena";
-  }, [showSettings, showAuth, authView, activeLeagueTab]);
+  }, [showAchievements, showSettings, showAuth, authView, activeLeagueTab]);
   const canRefresh =
-    !showAuth && !showSettings && isConfigured && isAuthenticated;
+    !showAuth &&
+    !showSettings &&
+    !showAchievements &&
+    isConfigured &&
+    isAuthenticated;
   const updateLabel = latestVersion ? `Update v${latestVersion}` : "Update";
   const updateButton = updateAvailable ? (
     <button
@@ -1324,7 +1557,11 @@ const App = () => {
   }
 
   const showDockedAdd = Boolean(
-    showDockedAddFriend && isConfigured && isAuthenticated && !showSettings
+    showDockedAddFriend &&
+      isConfigured &&
+      isAuthenticated &&
+      !showSettings &&
+      !showAchievements
   );
 
   return (
@@ -1360,7 +1597,20 @@ const App = () => {
                 ↻
               </button>
             )}
-            {canShowSettings && (
+            {canShowControlTabs && (
+              <button
+                type="button"
+                className={`icon-button ghost-button ${
+                  activeTab === "achievements" ? "active" : ""
+                }`}
+                onClick={openAchievementsPage}
+                aria-label="Achievements"
+                title="Open achievements"
+              >
+                🏆
+              </button>
+            )}
+            {canShowControlTabs && (
               <button
                 type="button"
                 className={`icon-button ghost-button ${
@@ -1572,6 +1822,73 @@ const App = () => {
               Sign in
             </button>
           </div>
+        </section>
+      ) : showAchievements ? (
+        <section className="panel achievement-page">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Achievements</p>
+              <h2>Complete trophy list</h2>
+              <p className="muted">
+                {achievementCatalog
+                  ? `${achievementCatalog.unlockedCount}/${achievementCatalog.totalDefined} unlocked`
+                  : "Loading your progress"}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="ghost tiny"
+              onClick={() => {
+                void loadAchievementCatalog(true);
+              }}
+              disabled={achievementCatalogLoading}
+            >
+              Refresh
+            </button>
+          </div>
+          {achievementCatalogLoading && !achievementCatalog ? (
+            <div className="loading-shimmer" aria-hidden="true" />
+          ) : achievementCatalogError && !achievementCatalog ? (
+            <div className="error">
+              <span>{achievementCatalogError}</span>
+              <button
+                className="ghost tiny"
+                onClick={() => {
+                  void loadAchievementCatalog(true);
+                }}
+              >
+                Retry
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="achievement-summary">
+                <div className="summary-chip">
+                  <span className="summary-chip-label">User</span>
+                  <span>{achievementCatalog?.username ?? "-"}</span>
+                </div>
+                <div className="summary-chip">
+                  <span className="summary-chip-label">Total unlocks</span>
+                  <span>{achievementCatalog?.totalUnlocks ?? 0}</span>
+                </div>
+                <div className="summary-chip">
+                  <span className="summary-chip-label">Badges unlocked</span>
+                  <span>
+                    {achievementCatalog?.unlockedCount ?? 0}/
+                    {achievementCatalog?.totalDefined ?? 0}
+                  </span>
+                </div>
+              </div>
+              <div className="achievement-catalog-grid">
+                {achievementCatalogEntries.map((achievement) => (
+                  <AchievementCatalogCard
+                    key={achievement.id}
+                    achievement={achievement}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </section>
       ) : showSettings ? (
         <>
@@ -1985,12 +2302,14 @@ const App = () => {
                                 displayPinnedEntry as WeeklyLeaderboardEntry
                               }
                               isSelf
+                              onSelect={handleRowSelect}
                             />
                           ) : (
                             <LeaderboardRow
                               key={`self-${displayPinnedEntry.username}`}
                               entry={displayPinnedEntry as LeaderboardEntry}
                               isSelf
+                              onSelect={handleRowSelect}
                             />
                           ))}
                         {activeLeagueTab === "weekly"
@@ -2001,6 +2320,7 @@ const App = () => {
                                 isSelf={
                                   entry.username === config?.wakawarsUsername
                                 }
+                                onSelect={handleRowSelect}
                               />
                             ))
                           : listEntries.map((entry) => (
@@ -2010,6 +2330,7 @@ const App = () => {
                                 isSelf={
                                   entry.username === config?.wakawarsUsername
                                 }
+                                onSelect={handleRowSelect}
                               />
                             ))}
                       </div>
@@ -2050,26 +2371,16 @@ const App = () => {
               </p>
             )}
           </section>
-          {/* 
-          <section className="panel achievement-panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">Achievements</p>
-                <h2>Trophy vault</h2>
-                <p className="muted">Unlock badges by building momentum.</p>
-              </div>
-            </div>
-            <QuestCard quests={quests} />
-            <div className="achievement-grid">
-              {achievements.map((achievement) => (
-                <AchievementCard
-                  key={achievement.id}
-                  achievement={achievement}
-                />
-              ))}
-            </div>
-          </section>
-          */}
+          {showHoverModal && hoveredUsername && hoveredAchievementsState && (
+            <UserAchievementsModal
+              modalRef={achievementsModalRef}
+              username={hoveredAchievementsState.data?.username ?? hoveredUsername}
+              state={hoveredAchievementsState}
+              onRetry={() => {
+                void fetchUserAchievements(hoveredUsername, true);
+              }}
+            />
+          )}
           {showDockedAdd && (
             <AddFriendCard
               docked
@@ -2121,52 +2432,124 @@ const rankDisplay = (rank: number | null) => {
 
 type RowEntry = LeaderboardEntry | WeeklyLeaderboardEntry;
 
-const QuestCard = ({ quests }: { quests: Quest[] }) => (
-  <div className="subcard quest-card">
-    <div className="subcard-header">
-      <h3>Battle quests</h3>
-      <span className="muted">Daily objectives</span>
-    </div>
-    <div className="quest-list">
-      {quests.map((quest) => (
-        <div key={quest.id} className={`quest-item ${quest.status}`}>
-          <div className="quest-copy">
-            <span className="quest-title">{quest.title}</span>
-            <span className="muted">{quest.description}</span>
-          </div>
-          <div className="quest-progress">
-            <div className="progress-track small">
-              <div
-                className="progress-fill"
-                style={{ width: `${Math.max(6, quest.progress * 100)}%` }}
-              />
-            </div>
-            <span className="achievement-meta">{quest.progressLabel}</span>
-          </div>
-        </div>
-      ))}
-    </div>
-  </div>
-);
+const formatAchievementDate = (value: string): string => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown";
+  }
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
 
-const AchievementCard = ({ achievement }: { achievement: Achievement }) => (
-  <div className={`achievement-card ${achievement.status}`}>
-    <div className="achievement-icon">{achievement.icon}</div>
-    <div>
-      <div className="achievement-title">{achievement.title}</div>
-      <div className="achievement-desc muted">{achievement.description}</div>
-    </div>
-    <div className="achievement-progress">
-      <div className="progress-track small">
-        <div
-          className="progress-fill"
-          style={{ width: `${Math.max(6, achievement.progress * 100)}%` }}
-        />
+const formatOptionalAchievementDate = (value: string | null): string => {
+  if (!value) return "Not unlocked yet";
+  return formatAchievementDate(value);
+};
+
+const AchievementCatalogCard = ({
+  achievement,
+}: {
+  achievement: AchievementCatalogItem;
+}) => {
+  const rarity = getAchievementRarity(achievement.id);
+
+  return (
+    <div
+      className={`achievement-catalog-card ${
+        achievement.unlocked ? "unlocked" : "locked"
+      } rarity-${rarity}`}
+      data-rarity={rarity}
+      aria-disabled={!achievement.unlocked}
+    >
+      <div className="achievement-catalog-icon">{achievement.icon}</div>
+      <div className="achievement-catalog-copy">
+        <div className="achievement-catalog-title-row">
+          <span className="achievement-catalog-title">{achievement.title}</span>
+          <span className="achievement-catalog-count">
+            {achievement.count > 0 ? `${achievement.count}x` : "Locked"}
+          </span>
+        </div>
+        <p className="achievement-catalog-desc">{achievement.description}</p>
+        <span className="achievement-catalog-meta">
+          Last unlock: {formatOptionalAchievementDate(achievement.lastAwardedAt)}
+        </span>
       </div>
-      <span className="achievement-meta">{achievement.progressLabel}</span>
     </div>
-  </div>
-);
+  );
+};
+
+const UserAchievementsModal = ({
+  modalRef,
+  username,
+  state,
+  onRetry,
+}: {
+  modalRef: RefObject<HTMLElement>;
+  username: string;
+  state: { loading: boolean; data: UserAchievementsPayload | null; error: string | null };
+  onRetry: () => void;
+}) => {
+  const achievements = state.data?.achievements ?? [];
+
+  return (
+    <aside ref={modalRef} className="achievement-hover-modal">
+      <div className="achievement-hover-head">
+        <p className="eyebrow">Achievements</p>
+        <h3>{username}</h3>
+        <span className="muted">
+          Total unlocks: {state.data?.totalUnlocks ?? 0}
+        </span>
+      </div>
+      {state.loading && !state.data ? (
+        <p className="muted">Loading achievements...</p>
+      ) : state.error && !state.data ? (
+        <div className="achievement-hover-error">
+          <p className="muted">{state.error}</p>
+          <button type="button" className="ghost tiny" onClick={onRetry}>
+            Retry
+          </button>
+        </div>
+      ) : achievements.length === 0 ? (
+        <p className="muted">No achievements unlocked yet.</p>
+      ) : (
+        <div className="achievement-hover-list">
+          {achievements.map((achievement) => {
+            const rarity = getAchievementRarity(achievement.id);
+
+            return (
+              <div
+                key={achievement.id}
+                className={`achievement-hover-item rarity-${rarity}`}
+                data-rarity={rarity}
+              >
+                <div
+                  className="achievement-hover-icon"
+                  title={achievement.description}
+                  aria-label={`${achievement.title}: ${achievement.description}`}
+                >
+                  {achievement.icon}
+                  <span className="achievement-hover-count-badge">
+                    {achievement.count}x
+                  </span>
+                </div>
+                <div className="achievement-hover-copy">
+                  <div className="achievement-hover-title-row">
+                    <span className="achievement-hover-title">
+                      {achievement.title}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </aside>
+  );
+};
 
 const MiniRow = ({ entry, isSelf }: { entry: RowEntry; isSelf: boolean }) => {
   const { rankLabel, podiumClass } = rankDisplay(entry.rank ?? null);
@@ -2188,26 +2571,37 @@ const BaseLeaderboardRow = ({
   entry,
   isSelf,
   secondary,
+  onSelect,
 }: {
   entry: RowEntry;
   isSelf: boolean;
   secondary?: string | null;
+  onSelect?: (username: string) => void;
 }) => {
   const { rankLabel, podiumClass } = rankDisplay(entry.rank ?? null);
   const timeLabel = statusLabel(entry.status, entry.totalSeconds);
   const timeClass = entry.status === "ok" ? "time" : "time muted status";
+  const handleClick = () => onSelect?.(entry.username);
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!onSelect) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    onSelect(entry.username);
+  };
 
   return (
     <div
-      className={`row-item ${isSelf ? "self" : ""} ${podiumClass} status-${
-        entry.status
-      }`}
+      className={`row-item row-item-trigger ${isSelf ? "self" : ""} ${podiumClass} status-${entry.status}`}
+      role={onSelect ? "button" : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      onClick={onSelect ? handleClick : undefined}
+      onKeyDown={handleKeyDown}
     >
       <div className="row-item-left">
         <div className="avatar">{entry.username.slice(0, 1).toUpperCase()}</div>
         <div className="row-content">
           <div className="row-title">
-            <span>{entry.username}</span>
+            <span className="username-trigger">{entry.username}</span>
             {isSelf && <span className="badge">YOU</span>}
           </div>
           {secondary && (
@@ -2230,19 +2624,29 @@ const BaseLeaderboardRow = ({
 const LeaderboardRow = ({
   entry,
   isSelf,
+  onSelect,
 }: {
   entry: LeaderboardEntry;
   isSelf: boolean;
+  onSelect?: (username: string) => void;
 }) => {
-  return <BaseLeaderboardRow entry={entry} isSelf={isSelf} />;
+  return (
+    <BaseLeaderboardRow
+      entry={entry}
+      isSelf={isSelf}
+      onSelect={onSelect}
+    />
+  );
 };
 
 const WeeklyLeaderboardRow = ({
   entry,
   isSelf,
+  onSelect,
 }: {
   entry: WeeklyLeaderboardEntry;
   isSelf: boolean;
+  onSelect?: (username: string) => void;
 }) => {
   const averageLabel =
     entry.status === "ok" ? formatDuration(entry.dailyAverageSeconds) : null;
@@ -2252,6 +2656,7 @@ const WeeklyLeaderboardRow = ({
       entry={entry}
       isSelf={isSelf}
       secondary={averageLabel ? `Avg ${averageLabel}/day` : null}
+      onSelect={onSelect}
     />
   );
 };

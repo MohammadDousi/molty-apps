@@ -1,5 +1,6 @@
 import type { UserRepository } from "./repository.js";
 import type { WakaTimeClient, WakaTimeStatsResult } from "./wakatime.js";
+import { awardWeeklyAchievements } from "./achievements.js";
 import {
   DEFAULT_WAKATIME_BATCH_DELAY_MS,
   DEFAULT_WAKATIME_BATCH_SIZE,
@@ -68,6 +69,29 @@ export const createWakaTimeWeeklyCache = ({
     try {
       const weeklyResult = await wakatime.getStatsRange(weeklyRangeKey, trimmedKey);
       setEntry(id, weeklyRangeKey, weeklyResult);
+
+      if (!weeklyResult.fromCache) {
+        await store.upsertWeeklyStat({
+          userId: id,
+          rangeKey: weeklyRangeKey,
+          totalSeconds: weeklyResult.totalSeconds,
+          dailyAverageSeconds: weeklyResult.dailyAverageSeconds,
+          status: weeklyResult.status,
+          error: weeklyResult.error ?? null,
+          fetchedAt: new Date(weeklyResult.fetchedAt)
+        });
+      }
+
+      await awardWeeklyAchievements({
+        store,
+        userId: id,
+        rangeKey: weeklyRangeKey,
+        status: weeklyResult.status,
+        totalSeconds: weeklyResult.totalSeconds,
+        dailyAverageSeconds: weeklyResult.dailyAverageSeconds,
+        payload: weeklyResult.payload,
+        fetchedAt: new Date(weeklyResult.fetchedAt)
+      });
     } catch (error) {
       reportError(error);
     }
@@ -91,6 +115,29 @@ export const createWakaTimeWeeklyCache = ({
         async (user) => {
           const weeklyResult = await wakatime.getStatsRange(weeklyRangeKey, user.apiKey);
           setEntry(user.id, weeklyRangeKey, weeklyResult);
+
+          if (!weeklyResult.fromCache) {
+            await store.upsertWeeklyStat({
+              userId: user.id,
+              rangeKey: weeklyRangeKey,
+              totalSeconds: weeklyResult.totalSeconds,
+              dailyAverageSeconds: weeklyResult.dailyAverageSeconds,
+              status: weeklyResult.status,
+              error: weeklyResult.error ?? null,
+              fetchedAt: new Date(weeklyResult.fetchedAt)
+            });
+          }
+
+          await awardWeeklyAchievements({
+            store,
+            userId: user.id,
+            rangeKey: weeklyRangeKey,
+            status: weeklyResult.status,
+            totalSeconds: weeklyResult.totalSeconds,
+            dailyAverageSeconds: weeklyResult.dailyAverageSeconds,
+            payload: weeklyResult.payload,
+            fetchedAt: new Date(weeklyResult.fetchedAt)
+          });
         },
         {
           batchSize: DEFAULT_WAKATIME_BATCH_SIZE,

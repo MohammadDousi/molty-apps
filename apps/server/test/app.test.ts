@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { DailyStatStatus, UserConfig } from "@molty/shared";
 import { createServer } from "../src/app.js";
-import type { UserRepository } from "../src/repository.js";
+import type { AchievementContextKind, UserRepository } from "../src/repository.js";
+import { ACHIEVEMENT_DEFINITIONS } from "../src/achievements.js";
 
 type UserRecord = Omit<UserConfig, "friends" | "groups">;
 type DailyStatRecord = {
@@ -21,6 +22,14 @@ type WeeklyStatRecord = {
   error: string | null;
   fetchedAt: Date;
 };
+type AchievementRecord = {
+  userId: number;
+  achievementId: string;
+  contextKind: AchievementContextKind;
+  contextKey: string;
+  awardedAt: Date;
+  metadata: unknown | null;
+};
 
 const createMemoryRepository = (): UserRepository => {
   let users: UserRecord[] = [];
@@ -29,6 +38,7 @@ const createMemoryRepository = (): UserRepository => {
   let groupMembers: Array<{ groupId: number; userId: number }> = [];
   let dailyStats: DailyStatRecord[] = [];
   let weeklyStats: WeeklyStatRecord[] = [];
+  let achievements: AchievementRecord[] = [];
   let nextId = 1;
   let nextGroupId = 1;
 
@@ -290,6 +300,72 @@ const createMemoryRepository = (): UserRepository => {
           ...stat,
           username: users.find((user) => user.id === stat.userId)?.wakawarsUsername ?? ""
         })),
+    grantAchievement: async (input) => {
+      const existingIndex = achievements.findIndex(
+        (entry) =>
+          entry.userId === input.userId &&
+          entry.achievementId === input.achievementId &&
+          entry.contextKind === input.contextKind &&
+          entry.contextKey === input.contextKey
+      );
+      const record: AchievementRecord = {
+        userId: input.userId,
+        achievementId: input.achievementId,
+        contextKind: input.contextKind,
+        contextKey: input.contextKey,
+        awardedAt: input.awardedAt,
+        metadata: input.metadata ?? null
+      };
+      if (existingIndex >= 0) {
+        achievements = achievements.map((entry, index) =>
+          index === existingIndex ? record : entry
+        );
+        return;
+      }
+
+      achievements = [...achievements, record];
+    },
+    listAchievementUnlocks: async ({ userId }) => {
+      const grouped = new Map<
+        string,
+        { count: number; firstAwardedAt: Date; lastAwardedAt: Date }
+      >();
+
+      achievements
+        .filter((entry) => entry.userId === userId)
+        .forEach((entry) => {
+          const existing = grouped.get(entry.achievementId);
+          if (!existing) {
+            grouped.set(entry.achievementId, {
+              count: 1,
+              firstAwardedAt: entry.awardedAt,
+              lastAwardedAt: entry.awardedAt
+            });
+            return;
+          }
+
+          grouped.set(entry.achievementId, {
+            count: existing.count + 1,
+            firstAwardedAt:
+              existing.firstAwardedAt.getTime() <= entry.awardedAt.getTime()
+                ? existing.firstAwardedAt
+                : entry.awardedAt,
+            lastAwardedAt:
+              existing.lastAwardedAt.getTime() >= entry.awardedAt.getTime()
+                ? existing.lastAwardedAt
+                : entry.awardedAt
+          });
+        });
+
+      return Array.from(grouped.entries())
+        .map(([achievementId, value]) => ({
+          achievementId,
+          count: value.count,
+          firstAwardedAt: value.firstAwardedAt,
+          lastAwardedAt: value.lastAwardedAt
+        }))
+        .sort((a, b) => b.lastAwardedAt.getTime() - a.lastAwardedAt.getTime());
+    },
     createProviderLog: async () => {}
   };
 };
@@ -913,5 +989,263 @@ describe("server app", () => {
 
     const privateEntry = statsPayload.entries.find((entry) => entry.username === "private");
     expect(privateEntry?.status).toBe("private");
+  });
+
+  it("returns aggregated achievements with repeat counts", async () => {
+    const repository = createMemoryRepository();
+    const { app, store } = createServer({
+      port: 0,
+      repository,
+      enableStatusSync: false
+    });
+
+    const { sessionId } = await getSessionId(
+      await app.handle(
+        new Request("http://localhost/wakawars/v0/config", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            wakawarsUsername: "mo",
+            apiKey: "key"
+          })
+        })
+      )
+    );
+
+    const mo = await store.getUserByUsername("mo");
+    const baseDate = new Date("2026-02-01T12:00:00.000Z");
+    await Promise.all([
+      store.grantAchievement({
+        userId: mo!.id,
+        achievementId: "merge-mountain-12h",
+        contextKind: "daily",
+        contextKey: "2026-02-01",
+        awardedAt: baseDate
+      }),
+      store.grantAchievement({
+        userId: mo!.id,
+        achievementId: "merge-mountain-12h",
+        contextKind: "daily",
+        contextKey: "2026-02-02",
+        awardedAt: new Date("2026-02-02T12:00:00.000Z")
+      }),
+      store.grantAchievement({
+        userId: mo!.id,
+        achievementId: "merge-mountain-12h",
+        contextKind: "daily",
+        contextKey: "2026-02-03",
+        awardedAt: new Date("2026-02-03T12:00:00.000Z")
+      }),
+      store.grantAchievement({
+        userId: mo!.id,
+        achievementId: "merge-mountain-12h",
+        contextKind: "daily",
+        contextKey: "2026-02-04",
+        awardedAt: new Date("2026-02-04T12:00:00.000Z")
+      }),
+      store.grantAchievement({
+        userId: mo!.id,
+        achievementId: "streak-forge-8h",
+        contextKind: "daily",
+        contextKey: "2026-02-04",
+        awardedAt: new Date("2026-02-04T12:00:00.000Z")
+      })
+    ]);
+
+    const response = await app.handle(
+      new Request("http://localhost/wakawars/v0/achievements/mo", {
+        headers: { "x-wakawars-session": sessionId ?? "" }
+      })
+    );
+
+    const payload = (await response.json()) as {
+      username: string;
+      totalUnlocks: number;
+      achievements: Array<{ id: string; count: number }>;
+    };
+    const mergeAchievement = payload.achievements.find(
+      (achievement) => achievement.id === "merge-mountain-12h"
+    );
+    expect(payload.username).toBe("mo");
+    expect(payload.totalUnlocks).toBe(5);
+    expect(mergeAchievement?.count).toBe(4);
+  });
+
+  it("returns full achievement catalog with locked and unlocked items", async () => {
+    const repository = createMemoryRepository();
+    const { app, store } = createServer({
+      port: 0,
+      repository,
+      enableStatusSync: false
+    });
+
+    const { sessionId } = await getSessionId(
+      await app.handle(
+        new Request("http://localhost/wakawars/v0/config", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            wakawarsUsername: "mo",
+            apiKey: "key"
+          })
+        })
+      )
+    );
+
+    const mo = await store.getUserByUsername("mo");
+    await store.grantAchievement({
+      userId: mo!.id,
+      achievementId: "streak-forge-8h",
+      contextKind: "daily",
+      contextKey: "2026-02-10",
+      awardedAt: new Date("2026-02-10T12:00:00.000Z")
+    });
+
+    const response = await app.handle(
+      new Request("http://localhost/wakawars/v0/achievements", {
+        headers: { "x-wakawars-session": sessionId ?? "" }
+      })
+    );
+
+    const payload = (await response.json()) as {
+      totalDefined: number;
+      unlockedCount: number;
+      achievements: Array<{ id: string; unlocked: boolean; count: number }>;
+    };
+    const unlocked = payload.achievements.find(
+      (achievement) => achievement.id === "streak-forge-8h"
+    );
+    const locked = payload.achievements.find(
+      (achievement) => achievement.id === "legendary-commit-16h"
+    );
+
+    expect(payload.totalDefined).toBe(ACHIEVEMENT_DEFINITIONS.length);
+    expect(payload.unlockedCount).toBe(1);
+    expect(payload.achievements.length).toBe(ACHIEVEMENT_DEFINITIONS.length);
+    expect(unlocked?.unlocked).toBe(true);
+    expect(unlocked?.count).toBe(1);
+    expect(locked?.unlocked).toBe(false);
+    expect(locked?.count).toBe(0);
+  });
+
+  it("unlocks achievements from daily and weekly sync", async () => {
+    const repository = createMemoryRepository();
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input);
+
+      if (url.includes("/status_bar/today")) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              grand_total: {
+                total_seconds: 12 * 60 * 60
+              },
+              range: {
+                date: "2026-02-10",
+                timezone: "UTC"
+              },
+              editors: [
+                {
+                  name: "VS Code",
+                  total_seconds: 12 * 60 * 60
+                }
+              ]
+            }
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        );
+      }
+
+      if (url.includes("/stats/")) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              total_seconds: 85 * 60 * 60,
+              daily_average: Math.round((85 * 60 * 60) / 7),
+              range: {
+                end: "2026-02-10"
+              },
+              editors: [
+                {
+                  name: "VS Code",
+                  total_seconds: 85 * 60 * 60
+                }
+              ],
+              languages: [
+                { name: "TypeScript", total_seconds: 20 * 60 * 60 },
+                { name: "JavaScript", total_seconds: 18 * 60 * 60 },
+                { name: "Go", total_seconds: 16 * 60 * 60 },
+                { name: "Rust", total_seconds: 14 * 60 * 60 },
+                { name: "SQL", total_seconds: 17 * 60 * 60 }
+              ]
+            }
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ error: "Not found" }), {
+        status: 404,
+        headers: { "content-type": "application/json" }
+      });
+    };
+
+    const { app, store, statusSync, weeklyCache } = createServer({
+      port: 0,
+      repository,
+      fetcher,
+      enableStatusSync: false,
+      enableWeeklyCache: false
+    });
+
+    const { sessionId } = await getSessionId(
+      await app.handle(
+        new Request("http://localhost/wakawars/v0/config", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            wakawarsUsername: "mo",
+            apiKey: "key-mo"
+          })
+        })
+      )
+    );
+
+    const mo = await store.getUserByUsername("mo");
+    await statusSync.syncUser({
+      id: mo!.id,
+      apiKey: mo!.apiKey,
+      wakatimeTimezone: mo!.wakatimeTimezone
+    });
+    await weeklyCache.syncUser({
+      id: mo!.id,
+      apiKey: mo!.apiKey
+    });
+
+    const response = await app.handle(
+      new Request("http://localhost/wakawars/v0/achievements/mo", {
+        headers: { "x-wakawars-session": sessionId ?? "" }
+      })
+    );
+
+    const payload = (await response.json()) as {
+      achievements: Array<{ id: string }>;
+    };
+    const achievementIds = payload.achievements.map((achievement) => achievement.id);
+    expect(achievementIds).toContain("streak-forge-8h");
+    expect(achievementIds).toContain("merge-mountain-12h");
+    expect(achievementIds).toContain("solo-day-8h");
+    expect(achievementIds).toContain("overclocked-core-10h");
+    expect(achievementIds).toContain("green-wall-80h");
+    expect(achievementIds).toContain("mono-stack-80h");
+    expect(achievementIds).toContain("language-hydra-80h");
+    expect(achievementIds).toContain("marathon-pace-8h");
+    expect(achievementIds).not.toContain("legendary-commit-16h");
   });
 });
