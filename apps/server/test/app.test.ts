@@ -1455,4 +1455,68 @@ describe("server app", () => {
     expect(achievementIds).toContain("marathon-pace-8h");
     expect(achievementIds).not.toContain("legendary-commit-16h");
   });
+
+  it("treats Friday as weekend for weekend achievements", async () => {
+    const repository = createMemoryRepository();
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input);
+
+      if (url.includes("/status_bar/today")) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              grand_total: {
+                total_seconds: 12 * 60 * 60
+              },
+              range: {
+                date: "2026-02-20",
+                timezone: "UTC"
+              }
+            }
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ error: "Not found" }), {
+        status: 404,
+        headers: { "content-type": "application/json" }
+      });
+    };
+
+    const { app, store, statusSync } = createServer({
+      port: 0,
+      repository,
+      fetcher,
+      enableStatusSync: false,
+      enableWeeklyCache: false
+    });
+
+    await app.handle(
+      new Request("http://localhost/wakawars/v0/config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          wakawarsUsername: "mo",
+          apiKey: "key-mo"
+        })
+      })
+    );
+
+    const mo = await store.getUserByUsername("mo");
+    await statusSync.syncUser({
+      id: mo!.id,
+      apiKey: mo!.apiKey,
+      wakatimeTimezone: mo!.wakatimeTimezone
+    });
+
+    const unlocks = await store.listAchievementUnlocks({ userId: mo!.id });
+    const achievementIds = unlocks.map((achievement) => achievement.achievementId);
+
+    expect(achievementIds).toContain("weekend-warrior-8h");
+    expect(achievementIds).toContain("weekend-overdrive-12h");
+  });
 });

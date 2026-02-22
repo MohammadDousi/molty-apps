@@ -11,7 +11,7 @@ export { DEFAULT_WAKATIME_WEEKLY_RANGE } from "./wakatime-weekly-cache.js";
 
 export const DEFAULT_WAKATIME_SYNC_INTERVAL_MS = 2 * 60 * 1000;
 export const IRAN_DAILY_SYNC_TIME_ZONE = "Asia/Tehran";
-export const IRAN_DAILY_SYNC_HOUR = 11;
+export const IRAN_DAILY_SYNC_HOUR = 23;
 export const IRAN_DAILY_SYNC_MINUTE = 59;
 
 const MINUTE_MS = 60 * 1000;

@@ -7,7 +7,7 @@ import {
 } from "../src/wakatime-sync.js";
 
 describe("resolveNextDailyRunAt", () => {
-  it("returns same-day 11:59 Iran when current time is earlier", () => {
+  it("returns same-day 23:59 Iran when current time is earlier", () => {
     const now = new Date("2026-02-22T06:00:00.000Z");
 
     const nextRunAt = resolveNextDailyRunAt({
@@ -17,11 +17,11 @@ describe("resolveNextDailyRunAt", () => {
       minute: IRAN_DAILY_SYNC_MINUTE
     });
 
-    expect(nextRunAt.toISOString()).toBe("2026-02-22T08:29:00.000Z");
+    expect(nextRunAt.toISOString()).toBe("2026-02-22T20:29:00.000Z");
   });
 
-  it("returns next-day 11:59 Iran when current time is later", () => {
-    const now = new Date("2026-02-22T09:00:00.000Z");
+  it("returns next-day 23:59 Iran when current time is later", () => {
+    const now = new Date("2026-02-22T21:00:00.000Z");
 
     const nextRunAt = resolveNextDailyRunAt({
       now,
@@ -30,11 +30,11 @@ describe("resolveNextDailyRunAt", () => {
       minute: IRAN_DAILY_SYNC_MINUTE
     });
 
-    expect(nextRunAt.toISOString()).toBe("2026-02-23T08:29:00.000Z");
+    expect(nextRunAt.toISOString()).toBe("2026-02-23T20:29:00.000Z");
   });
 
-  it("schedules the next day when already at 11:59 Iran", () => {
-    const now = new Date("2026-02-22T08:29:00.000Z");
+  it("schedules the next day when already at 23:59 Iran", () => {
+    const now = new Date("2026-02-22T20:29:00.000Z");
 
     const nextRunAt = resolveNextDailyRunAt({
       now,
@@ -43,6 +43,6 @@ describe("resolveNextDailyRunAt", () => {
       minute: IRAN_DAILY_SYNC_MINUTE
     });
 
-    expect(nextRunAt.toISOString()).toBe("2026-02-23T08:29:00.000Z");
+    expect(nextRunAt.toISOString()).toBe("2026-02-23T20:29:00.000Z");
   });
 });
