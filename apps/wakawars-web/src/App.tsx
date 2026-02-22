@@ -2422,7 +2422,14 @@ const App = () => {
             )}
           </section>
           {showHoverModal && (
-            <div className="achievement-hover-backdrop" aria-hidden="true" />
+            <div
+              className="achievement-hover-backdrop"
+              aria-hidden="true"
+              onMouseDown={(event) => {
+                event.preventDefault();
+                setHoveredUsername(null);
+              }}
+            />
           )}
           {showHoverModal && hoveredUsername && hoveredAchievementsState && (
             <UserAchievementsModal

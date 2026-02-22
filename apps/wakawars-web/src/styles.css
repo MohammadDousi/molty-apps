@@ -1723,10 +1723,11 @@ button.icon-button.small:active:not(:disabled) {
   position: fixed;
   inset: 0;
   z-index: 35;
-  pointer-events: none;
+  pointer-events: auto;
   background: rgba(10, 18, 34, 0.14);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
+  cursor: pointer;
 }
 
 :root[data-theme="light"] .achievement-hover-backdrop {
@@ -1795,7 +1796,7 @@ button.icon-button.small:active:not(:disabled) {
 
 .achievement-hover-icon {
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   width: 68px;
   height: 68px;
   border-radius: 20px;
@@ -1866,7 +1867,7 @@ button.icon-button.small:active:not(:disabled) {
   font-family: var(--font-display);
   line-height: 1;
   pointer-events: none;
-  z-index: 2;
+  z-index: 3;
   box-shadow: 0 6px 16px rgba(7, 12, 20, 0.28);
 }
 
