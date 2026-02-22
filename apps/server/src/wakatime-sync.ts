@@ -10,6 +10,12 @@ import {
 export { DEFAULT_WAKATIME_WEEKLY_RANGE } from "./wakatime-weekly-cache.js";
 
 export const DEFAULT_WAKATIME_SYNC_INTERVAL_MS = 2 * 60 * 1000;
+export const IRAN_DAILY_SYNC_TIME_ZONE = "Asia/Tehran";
+export const IRAN_DAILY_SYNC_HOUR = 11;
+export const IRAN_DAILY_SYNC_MINUTE = 59;
+
+const MINUTE_MS = 60 * 1000;
+const MAX_SCHEDULE_LOOKAHEAD_MINUTES = 48 * 60;
 
 export type WakaTimeSyncOptions = {
   store: UserRepository;
@@ -30,6 +36,66 @@ export type WakaTimeSync = {
   }) => Promise<void>;
 };
 
+const createTimePartsFormatter = (timeZone: string) =>
+  new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  });
+
+const getTimePartsInTimeZone = (date: Date, formatter: Intl.DateTimeFormat) => {
+  const parts = formatter.formatToParts(date);
+  const hour = parts.find((part) => part.type === "hour")?.value;
+  const minute = parts.find((part) => part.type === "minute")?.value;
+  if (!hour || !minute) {
+    return null;
+  }
+
+  return {
+    hour: Number(hour),
+    minute: Number(minute)
+  };
+};
+
+export const resolveNextDailyRunAt = ({
+  now = new Date(),
+  timeZone,
+  hour,
+  minute
+}: {
+  now?: Date;
+  timeZone: string;
+  hour: number;
+  minute: number;
+}): Date => {
+  const currentMinuteStartMs = Math.floor(now.getTime() / MINUTE_MS) * MINUTE_MS;
+  let formatter: Intl.DateTimeFormat;
+
+  try {
+    formatter = createTimePartsFormatter(timeZone);
+  } catch {
+    return new Date(currentMinuteStartMs + 24 * 60 * MINUTE_MS);
+  }
+
+  for (
+    let offsetMinutes = 1;
+    offsetMinutes <= MAX_SCHEDULE_LOOKAHEAD_MINUTES;
+    offsetMinutes += 1
+  ) {
+    const candidate = new Date(currentMinuteStartMs + offsetMinutes * MINUTE_MS);
+    const candidateParts = getTimePartsInTimeZone(candidate, formatter);
+    if (!candidateParts) {
+      continue;
+    }
+    if (candidateParts.hour === hour && candidateParts.minute === minute) {
+      return candidate;
+    }
+  }
+
+  return new Date(currentMinuteStartMs + 24 * 60 * MINUTE_MS);
+};
+
 export const createWakaTimeSync = ({
   store,
   wakatime,
@@ -37,7 +103,9 @@ export const createWakaTimeSync = ({
   onError
 }: WakaTimeSyncOptions): WakaTimeSync => {
   let timer: NodeJS.Timeout | null = null;
+  let dailyTimer: NodeJS.Timeout | null = null;
   let running = false;
+  let stopped = false;
 
   const reportError = (error: unknown) => {
     if (onError) {
@@ -60,7 +128,7 @@ export const createWakaTimeSync = ({
     return toDateKeyInTimeZone(new Date(), input.timeZone ?? null);
   };
 
-  const runOnce = async () => {
+  const runOnceInternal = async ({ bypassCache = false }: { bypassCache?: boolean } = {}) => {
     if (running) return;
     running = true;
 
@@ -76,7 +144,9 @@ export const createWakaTimeSync = ({
       await runInBatches(
         targets,
         async (user) => {
-          const dailyResult = await wakatime.getStatusBarToday("current", user.apiKey);
+          const dailyResult = await wakatime.getStatusBarToday("current", user.apiKey, {
+            bypassCache
+          });
           const resolvedTimezone =
             dailyResult.timezone ?? user.wakatimeTimezone ?? null;
           const dateKey = resolveDateKey({
@@ -140,6 +210,10 @@ export const createWakaTimeSync = ({
     } finally {
       running = false;
     }
+  };
+
+  const runOnce = async () => {
+    await runOnceInternal();
   };
 
   const syncUser = async ({
@@ -217,18 +291,46 @@ export const createWakaTimeSync = ({
     }
   };
 
+  const scheduleDailyIranSync = () => {
+    if (dailyTimer || stopped) {
+      return;
+    }
+
+    const nextRunAt = resolveNextDailyRunAt({
+      timeZone: IRAN_DAILY_SYNC_TIME_ZONE,
+      hour: IRAN_DAILY_SYNC_HOUR,
+      minute: IRAN_DAILY_SYNC_MINUTE
+    });
+    const delayMs = Math.max(nextRunAt.getTime() - Date.now(), 1000);
+
+    dailyTimer = setTimeout(() => {
+      dailyTimer = null;
+      void runOnceInternal({ bypassCache: true }).finally(() => {
+        scheduleDailyIranSync();
+      });
+    }, delayMs);
+  };
+
   const start = () => {
     if (timer) return;
+    stopped = false;
     void runOnce();
     timer = setInterval(() => {
       void runOnce();
     }, intervalMs);
+    scheduleDailyIranSync();
   };
 
   const stop = () => {
-    if (!timer) return;
-    clearInterval(timer);
-    timer = null;
+    stopped = true;
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+    if (dailyTimer) {
+      clearTimeout(dailyTimer);
+      dailyTimer = null;
+    }
   };
 
   return { start, stop, runOnce, syncUser };

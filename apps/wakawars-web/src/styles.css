@@ -1796,7 +1796,8 @@ button.icon-button.small:active:not(:disabled) {
 
 .achievement-hover-icon {
   position: relative;
-  overflow: visible;
+  overflow: visible !important;
+  isolation: isolate;
   width: 68px;
   height: 68px;
   border-radius: 20px;
