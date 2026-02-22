@@ -1719,6 +1719,20 @@ button.icon-button.small:active:not(:disabled) {
   animation: shimmer 1.6s ease infinite;
 }
 
+.achievement-hover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  pointer-events: none;
+  background: rgba(10, 18, 34, 0.14);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+:root[data-theme="light"] .achievement-hover-backdrop {
+  background: rgba(255, 255, 255, 0.22);
+}
+
 .achievement-hover-modal {
   position: fixed;
   top: 78px;

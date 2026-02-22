@@ -2421,6 +2421,9 @@ const App = () => {
               </p>
             )}
           </section>
+          {showHoverModal && (
+            <div className="achievement-hover-backdrop" aria-hidden="true" />
+          )}
           {showHoverModal && hoveredUsername && hoveredAchievementsState && (
             <UserAchievementsModal
               modalRef={achievementsModalRef}
