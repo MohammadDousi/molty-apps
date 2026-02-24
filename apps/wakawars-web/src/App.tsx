@@ -16,6 +16,9 @@ import {
   type LeaderboardEntry,
   type LeaderboardResponse,
   type PublicConfig,
+  type ShopCatalogResponse,
+  type SkinId,
+  type WalletResponse,
   type WeeklyLeaderboardEntry,
   type WeeklyLeaderboardResponse,
 } from "@molty/shared";
@@ -158,6 +161,44 @@ const HomeHeaderIcon = () => (
   </svg>
 );
 
+const ShopHeaderIcon = () => (
+  <svg
+    aria-hidden="true"
+    focusable="false"
+    viewBox="0 0 24 24"
+    width="16"
+    height="16"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M6.5 8h11l-1 11h-9l-1-11Z" />
+    <path d="M9 8V6.5a3 3 0 0 1 6 0V8" />
+  </svg>
+);
+
+const CoinIcon = () => (
+  <svg
+    aria-hidden="true"
+    focusable="false"
+    viewBox="0 0 24 24"
+    className="coin-icon"
+  >
+    <circle cx="12" cy="12" r="9" fill="currentColor" opacity="0.18" />
+    <circle
+      cx="12"
+      cy="12"
+      r="7.2"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+    />
+    <circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" strokeWidth="1.5" />
+  </svg>
+);
+
 type AddFriendCardProps = {
   docked?: boolean;
   dismissible?: boolean;
@@ -252,7 +293,7 @@ const App = () => {
     Record<number, string>
   >({});
   const [activeTab, setActiveTab] = useState<
-    "league" | "achievements" | "settings"
+    "league" | "shop" | "achievements" | "settings"
   >("league");
   const [activeLeagueTab, setActiveLeagueTab] = useState<"today" | "weekly">(
     "today"
@@ -272,7 +313,10 @@ const App = () => {
   const [theme, setTheme] = useState<"dark" | "light">(() => {
     const stored = localStorage.getItem("wakawarsTheme");
     if (stored === "light" || stored === "dark") return stored;
-    if (window.matchMedia?.("(prefers-color-scheme: light)").matches) {
+    const prefersLight = window.matchMedia?.(
+      "(prefers-color-scheme: light)"
+    )?.matches;
+    if (prefersLight) {
       return "light";
     }
     return "dark";
@@ -306,6 +350,15 @@ const App = () => {
   const [achievementCatalogError, setAchievementCatalogError] = useState<
     string | null
   >(null);
+  const [wallet, setWallet] = useState<WalletResponse | null>(null);
+  const [shopCatalog, setShopCatalog] = useState<ShopCatalogResponse | null>(
+    null
+  );
+  const [shopLoading, setShopLoading] = useState(false);
+  const [shopError, setShopError] = useState<string | null>(null);
+  const [shopPendingSkinId, setShopPendingSkinId] = useState<SkinId | null>(
+    null
+  );
 
   const isAuthenticated = Boolean(session?.authenticated);
   const isConfigured = Boolean(config?.wakawarsUsername && config?.hasApiKey);
@@ -1195,6 +1248,92 @@ const App = () => {
     void loadAchievementCatalog(false);
   }, [loadAchievementCatalog]);
 
+  const loadEconomy = useCallback(
+    async (silent = false) => {
+      if (!isAuthenticated || !isConfigured) return;
+
+      if (!silent) {
+        setShopLoading(true);
+      }
+      setShopError(null);
+
+      try {
+        const [walletPayload, shopPayload] = await Promise.all([
+          request<WalletResponse>("/wallet"),
+          request<ShopCatalogResponse>("/shop/skins"),
+        ]);
+        setWallet(walletPayload);
+        setShopCatalog(shopPayload);
+      } catch (err) {
+        setShopError(
+          err instanceof Error ? err.message : "Failed to load shop"
+        );
+      } finally {
+        if (!silent) {
+          setShopLoading(false);
+        }
+      }
+    },
+    [isAuthenticated, isConfigured, request]
+  );
+
+  useEffect(() => {
+    if (!isConfigured || !isAuthenticated) return;
+    void loadEconomy(true);
+  }, [isConfigured, isAuthenticated, loadEconomy]);
+
+  useEffect(() => {
+    if (isConfigured && isAuthenticated) return;
+    setWallet(null);
+    setShopCatalog(null);
+    setShopError(null);
+    setShopPendingSkinId(null);
+  }, [isConfigured, isAuthenticated]);
+
+  const handlePurchaseSkin = useCallback(
+    async (skinId: SkinId) => {
+      setShopPendingSkinId(skinId);
+      try {
+        const payload = await request<ShopCatalogResponse>(
+          `/shop/skins/${encodeURIComponent(skinId)}/purchase`,
+          { method: "POST" }
+        );
+        setShopCatalog(payload);
+        setError(null);
+        setShopError(null);
+        await loadEconomy(true);
+        await loadStats({ silent: true, includeWeekly: shouldIncludeWeekly });
+      } catch (err) {
+        setShopError(err instanceof Error ? err.message : "Purchase failed");
+      } finally {
+        setShopPendingSkinId(null);
+      }
+    },
+    [loadEconomy, loadStats, request, shouldIncludeWeekly]
+  );
+
+  const handleEquipSkin = useCallback(
+    async (skinId: SkinId) => {
+      setShopPendingSkinId(skinId);
+      try {
+        const payload = await request<ShopCatalogResponse>(
+          `/shop/skins/${encodeURIComponent(skinId)}/equip`,
+          { method: "POST" }
+        );
+        setShopCatalog(payload);
+        setError(null);
+        setShopError(null);
+        await loadEconomy(true);
+        await loadStats({ silent: true, includeWeekly: shouldIncludeWeekly });
+      } catch (err) {
+        setShopError(err instanceof Error ? err.message : "Equip failed");
+      } finally {
+        setShopPendingSkinId(null);
+      }
+    },
+    [loadEconomy, loadStats, request, shouldIncludeWeekly]
+  );
+
   const fetchUserAchievements = useCallback(
     async (username: string, force = false) => {
       const normalized = username.trim().toLowerCase();
@@ -1257,6 +1396,11 @@ const App = () => {
     setAchievementCatalog(null);
     setAchievementCatalogError(null);
     setAchievementCatalogLoading(false);
+    setWallet(null);
+    setShopCatalog(null);
+    setShopError(null);
+    setShopLoading(false);
+    setShopPendingSkinId(null);
   }, [isAuthenticated]);
 
   useEffect(() => {
@@ -1268,6 +1412,11 @@ const App = () => {
     if (activeTab !== "achievements") return;
     void loadAchievementCatalog(false);
   }, [activeTab, loadAchievementCatalog]);
+
+  useEffect(() => {
+    if (activeTab !== "shop") return;
+    void loadEconomy(false);
+  }, [activeTab, loadEconomy]);
 
   useEffect(() => {
     if (!hoveredUsername) return;
@@ -1523,12 +1672,14 @@ const App = () => {
   const showSignIn = showAuth && authView === "signin";
   const showSignUp = showAuth && authView === "signup";
   const canShowControlTabs = Boolean(isConfigured && isAuthenticated);
+  const showShop = Boolean(canShowControlTabs && activeTab === "shop");
   const showAchievements = Boolean(
     canShowControlTabs && activeTab === "achievements"
   );
   const showSettings = Boolean(canShowControlTabs && activeTab === "settings");
   const passwordActionLabel = "Set password";
   const headerSubtitle = useMemo(() => {
+    if (showShop) return "Skin market";
     if (showAchievements) return "Trophy vault";
     if (showSettings) return "War room";
     if (showAuth) {
@@ -1537,11 +1688,12 @@ const App = () => {
       return "Welcome";
     }
     return activeLeagueTab === "weekly" ? "Weekly clash" : "Daily arena";
-  }, [showAchievements, showSettings, showAuth, authView, activeLeagueTab]);
+  }, [showShop, showAchievements, showSettings, showAuth, authView, activeLeagueTab]);
   const showHomeButton = Boolean(
-    canShowControlTabs && (showSettings || showAchievements)
+    canShowControlTabs && (showSettings || showAchievements || showShop)
   );
   const canRefresh = Boolean(canShowControlTabs && activeTab === "league");
+  const coinBalance = wallet?.coins ?? shopCatalog?.coins ?? 0;
   const updateLabel = latestVersion ? `Update v${latestVersion}` : "Update";
   const updateButton = updateAvailable ? (
     <button
@@ -1648,7 +1800,8 @@ const App = () => {
       isConfigured &&
       isAuthenticated &&
       !showSettings &&
-      !showAchievements
+      !showAchievements &&
+      !showShop
   );
 
   return (
@@ -1693,6 +1846,19 @@ const App = () => {
                 aria-label={refreshing ? "Refreshing stats" : "Refresh stats"}
               >
                 ↻
+              </button>
+            )}
+            {canShowControlTabs && (
+              <button
+                type="button"
+                className={`icon-button ghost-button ${
+                  activeTab === "shop" ? "active" : ""
+                }`}
+                onClick={() => setActiveTab("shop")}
+                aria-label="Shop"
+                title="Open shop"
+              >
+                <ShopHeaderIcon />
               </button>
             )}
             {canShowControlTabs && (
@@ -1984,6 +2150,131 @@ const App = () => {
                     achievement={achievement}
                   />
                 ))}
+              </div>
+            </>
+          )}
+        </section>
+      ) : showShop ? (
+        <section className="panel shop-panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Shop</p>
+              <h2>Skin market</h2>
+              <p className="muted">Buy and equip skins for leaderboard rows.</p>
+            </div>
+            <button
+              type="button"
+              className="ghost tiny"
+              onClick={() => {
+                void loadEconomy(false);
+              }}
+              disabled={shopLoading}
+            >
+              Refresh
+            </button>
+          </div>
+          {shopLoading && !shopCatalog ? (
+            <div className="loading-shimmer" aria-hidden="true" />
+          ) : shopError && !shopCatalog ? (
+            <div className="error">
+              <span>{shopError}</span>
+              <button
+                className="ghost tiny"
+                onClick={() => {
+                  void loadEconomy(false);
+                }}
+              >
+                Retry
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="shop-summary">
+                <div className="summary-chip">
+                  <span className="summary-chip-label">Coins</span>
+                  <span className="coin-inline">
+                    <CoinIcon />
+                    <span>{shopCatalog?.coins ?? wallet?.coins ?? 0}</span>
+                  </span>
+                </div>
+                <div className="summary-chip">
+                  <span className="summary-chip-label">Skins owned</span>
+                  <span>
+                    {shopCatalog?.skins.filter((skin) => skin.owned).length ?? 0}/
+                    {shopCatalog?.skins.length ?? 0}
+                  </span>
+                </div>
+                <div className="summary-chip">
+                  <span className="summary-chip-label">Equipped</span>
+                  <span>{shopCatalog?.equippedSkinId ?? "classic"}</span>
+                </div>
+              </div>
+              <div className="shop-grid">
+                {shopCatalog?.skins.map((skin) => {
+                  const pending = shopPendingSkinId === skin.id;
+                  const canAfford =
+                    (shopCatalog?.coins ?? wallet?.coins ?? 0) >= skin.priceCoins;
+                  const buyDisabled = loading || pending || !canAfford;
+                  const equipDisabled = loading || pending;
+
+                  return (
+                    <article
+                      key={skin.id}
+                      className={`shop-card ${skin.equipped ? "equipped" : ""}`}
+                      data-skin={skin.id}
+                    >
+                      <div className="shop-card-head">
+                        <strong>{skin.name}</strong>
+                        <span className="coin-inline">
+                          <CoinIcon />
+                          <span>{skin.priceCoins}</span>
+                        </span>
+                      </div>
+                      <p className="muted">{skin.description}</p>
+                      <div className="shop-card-actions">
+                        {!skin.owned ? (
+                          <button
+                            type="button"
+                            className={canAfford ? "primary" : "ghost tiny"}
+                            onClick={() => {
+                              void handlePurchaseSkin(skin.id);
+                            }}
+                            disabled={buyDisabled}
+                          >
+                            {canAfford ? "Buy" : "Need coins"}
+                          </button>
+                        ) : skin.equipped ? (
+                          <button type="button" className="ghost tiny" disabled>
+                            Equipped
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="primary"
+                            onClick={() => {
+                              void handleEquipSkin(skin.id);
+                            }}
+                            disabled={equipDisabled}
+                          >
+                            Equip
+                          </button>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+              <div className="shop-actions">
+                <button
+                  type="button"
+                  className="ghost tiny"
+                  onClick={() => {
+                    void handleEquipSkin("classic");
+                  }}
+                  disabled={loading || shopPendingSkinId === "classic"}
+                >
+                  Equip classic
+                </button>
               </div>
             </>
           )}
@@ -2367,13 +2658,19 @@ const App = () => {
           <section className="panel league-panel">
             <div className="league-header">
               <div className="league-title">
-                <h2>
-                  <span>
-                    {activeLeagueTab === "weekly"
-                      ? "Weekly leaderboard"
-                      : "Daily leaderboard"}
+                <div className="league-title-row">
+                  <h2>
+                    <span>
+                      {activeLeagueTab === "weekly"
+                        ? "Weekly leaderboard"
+                        : "Daily leaderboard"}
+                    </span>
+                  </h2>
+                  <span className="meta-pill coin-pill league-coin-pill" title={`${coinBalance} coins`}>
+                    <CoinIcon />
+                    <span>{coinBalance}</span>
                   </span>
-                </h2>
+                </div>
               </div>
               <div className="league-actions">
                 <div className="tab-group">
@@ -2711,6 +3008,7 @@ const BaseLeaderboardRow = ({
   const { rankLabel, podiumClass } = rankDisplay(entry.rank ?? null);
   const timeLabel = statusLabel(entry.status, entry.totalSeconds);
   const timeClass = entry.status === "ok" ? "time" : "time muted status";
+  const skinId = entry.equippedSkinId ?? "classic";
   const handleClick = () => onSelect?.(entry.username);
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (!onSelect) return;
@@ -2721,7 +3019,8 @@ const BaseLeaderboardRow = ({
 
   return (
     <div
-      className={`row-item row-item-trigger ${isSelf ? "self" : ""} ${podiumClass} status-${entry.status}`}
+      className={`row-item row-item-trigger ${isSelf ? "self" : ""} ${podiumClass} status-${entry.status} skin-${skinId}`}
+      data-skin={skinId}
       role={onSelect ? "button" : undefined}
       tabIndex={onSelect ? 0 : undefined}
       onClick={onSelect ? handleClick : undefined}

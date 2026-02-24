@@ -15,6 +15,9 @@ model ww_user {
   password_hash     String?
   stats_visibility  ww_stats_visibility @default(everyone)
   is_competing      Boolean         @default(true)
+  coin_balance      Int             @default(0)
+  equipped_skin_id  String?
+  equipped_skin     ww_skin_catalog? @relation("equipped_skin", fields: [equipped_skin_id], references: [id], onDelete: SetNull)
   friendships       ww_friendship[] @relation("user_friendships")
   friend_of         ww_friendship[] @relation("friend_friendships")
   groups_owned      ww_group[]      @relation("group_owner")
@@ -22,6 +25,9 @@ model ww_user {
   sessions          ww_session[]
   daily_stats       ww_daily_stat[]
   weekly_stats      ww_weekly_stat[]
+  owned_skins       ww_user_skin[]
+  coin_ledger       ww_coin_ledger[]
+  daily_reward_settlements ww_daily_reward_settlement[]
   achievements      ww_user_achievement[]
   provider_logs     ww_provider_log[]
   created_at        DateTime        @default(now())
@@ -113,6 +119,67 @@ model ww_weekly_stat {
 
   @@unique([user_id, range_key])
   @@index([range_key])
+}
+
+enum ww_coin_transaction_reason {
+  daily_rank_reward
+  skin_purchase
+}
+
+model ww_skin_catalog {
+  id          String        @id
+  name        String
+  description String
+  price_coins Int
+  is_active   Boolean       @default(true)
+  sort_order  Int           @default(0)
+  users_equipped ww_user[]  @relation("equipped_skin")
+  owned_by    ww_user_skin[]
+  created_at  DateTime      @default(now())
+  updated_at  DateTime      @updatedAt
+
+  @@index([is_active, sort_order])
+}
+
+model ww_user_skin {
+  id           Int      @id @default(autoincrement())
+  user_id      Int
+  user         ww_user  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  skin_id      String
+  skin         ww_skin_catalog @relation(fields: [skin_id], references: [id], onDelete: Restrict)
+  purchased_at DateTime @default(now())
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  @@unique([user_id, skin_id])
+  @@index([skin_id])
+}
+
+model ww_coin_ledger {
+  id         Int                        @id @default(autoincrement())
+  user_id    Int
+  user       ww_user                    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  amount     Int
+  reason     ww_coin_transaction_reason
+  metadata   Json?
+  created_at DateTime                   @default(now())
+  updated_at DateTime                   @updatedAt
+
+  @@index([user_id, created_at])
+}
+
+model ww_daily_reward_settlement {
+  id           Int      @id @default(autoincrement())
+  user_id      Int
+  user         ww_user  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  date_key     String
+  rank         Int?
+  coins_awarded Int     @default(0)
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  @@unique([user_id, date_key])
+  @@index([date_key])
 }
 
 enum ww_achievement_context_kind {
