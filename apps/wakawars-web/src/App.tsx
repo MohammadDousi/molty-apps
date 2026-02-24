@@ -13,6 +13,7 @@ import {
   formatDuration,
   computeLeaderboard,
   sliceLeaderboard,
+  type DailyHistoryResponse,
   type LeaderboardEntry,
   type LeaderboardResponse,
   type PublicConfig,
@@ -88,14 +89,8 @@ const COMMON_ACHIEVEMENT_IDS = new Set([
 const EPIC_ACHIEVEMENT_IDS = new Set([
   "merge-mountain-12h",
   "night-shift-14h",
-  "switchblade-day-8h",
-  "language-juggler-day-8h",
   "green-wall-80h",
-  "polyglot-stack-80h",
-  "language-hydra-80h",
   "project-monolith-80h",
-  "project-nomad-80h",
-  "iron-week-4h",
 ]);
 
 const LEGENDARY_ACHIEVEMENT_IDS = new Set([
@@ -103,10 +98,6 @@ const LEGENDARY_ACHIEVEMENT_IDS = new Set([
   "boss-raid-20h",
   "graph-overflow-100h",
   "matrix-120h",
-  "mono-stack-80h",
-  "mono-stack-100h",
-  "language-spectrum-80h",
-  "editor-arsenal-80h",
   "ultra-pace-10h",
 ]);
 
@@ -221,6 +212,8 @@ const App = () => {
   const [stats, setStats] = useState<LeaderboardResponse | null>(null);
   const [yesterdayStats, setYesterdayStats] =
     useState<LeaderboardResponse | null>(null);
+  const [dailyHistory, setDailyHistory] =
+    useState<DailyHistoryResponse | null>(null);
   const [weeklyStats, setWeeklyStats] =
     useState<WeeklyLeaderboardResponse | null>(null);
   const [competitionState, setCompetitionState] = useState<boolean | null>(null);
@@ -443,12 +436,17 @@ const App = () => {
       }
       try {
         const tasks: Array<
-          Promise<LeaderboardResponse | WeeklyLeaderboardResponse>
+          Promise<
+            LeaderboardResponse | WeeklyLeaderboardResponse | DailyHistoryResponse
+          >
         > = [
           request<LeaderboardResponse>("/stats/today", {
             signal: controller.signal,
           }),
           request<LeaderboardResponse>("/stats/yesterday", {
+            signal: controller.signal,
+          }),
+          request<DailyHistoryResponse>("/stats/history", {
             signal: controller.signal,
           }),
         ];
@@ -492,9 +490,22 @@ const App = () => {
         if (yesterdayResult?.status === "fulfilled") {
           setYesterdayStats(yesterdayResult.value as LeaderboardResponse);
         }
+        const historyResult = results[2];
+        if (historyResult?.status === "fulfilled") {
+          setDailyHistory(historyResult.value as DailyHistoryResponse);
+        } else if (historyResult?.status === "rejected") {
+          if (historyResult.reason?.name !== "AbortError") {
+            if (!nextError) {
+              nextError =
+                historyResult.reason instanceof Error
+                  ? historyResult.reason.message
+                  : "Failed to load history stats";
+            }
+          }
+        }
 
         if (includeWeekly) {
-          const weeklyResult = results[2];
+          const weeklyResult = results[3];
           if (weeklyResult?.status === "fulfilled") {
             const payload = weeklyResult.value as WeeklyLeaderboardResponse;
             setWeeklyStats(payload);
@@ -1366,6 +1377,7 @@ const App = () => {
       podiumCount: 3,
     }).podium;
   }, [config?.wakawarsUsername, yesterdayStats?.entries]);
+  const historyDays = dailyHistory?.days ?? [];
 
   const isCompeting = competitionState ?? config?.isCompeting ?? true;
 
@@ -2190,6 +2202,52 @@ const App = () => {
           <section className="panel settings-panel">
             <div className="panel-head">
               <div>
+                <p className="eyebrow">History</p>
+                <h2>Last 7 daily podiums</h2>
+                <p className="muted">Yesterday to seven days ago.</p>
+              </div>
+            </div>
+            {dailyHistory?.days?.length ? (
+              <div className="history-days">
+                {historyDays.map((day) => (
+                  <div
+                    className="history-day"
+                    key={`${day.offsetDays}-${day.date}`}
+                  >
+                    <div className="history-day-head">
+                      <span className="history-day-title">
+                        {formatHistoryDayLabel(day.offsetDays)}
+                      </span>
+                      <span className="muted history-day-date">
+                        {formatDateKey(day.date)}
+                      </span>
+                    </div>
+                    {day.podium.length ? (
+                      <div className="mini-list">
+                        {day.podium.map((entry) => (
+                          <MiniRow
+                            key={`history-${day.date}-${entry.username}`}
+                            entry={entry}
+                            isSelf={entry.username === config?.wakawarsUsername}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="muted">No ranked entries.</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">
+                {loading ? "Loading history..." : "No history available yet."}
+              </p>
+            )}
+          </section>
+
+          <section className="panel settings-panel">
+            <div className="panel-head">
+              <div>
                 <p className="eyebrow">Systems</p>
                 <h2>Launch & style</h2>
                 <p className="muted">Control launch behavior and theme.</p>
@@ -2492,6 +2550,27 @@ const rankDisplay = (rank: number | null) => {
 
 type RowEntry = LeaderboardEntry | WeeklyLeaderboardEntry;
 
+const isEntryOnline = (entry: RowEntry): boolean =>
+  entry.status === "ok" && "isOnline" in entry && Boolean(entry.isOnline);
+
+const formatDateKey = (dateKey: string): string => {
+  const date = new Date(`${dateKey}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) {
+    return dateKey;
+  }
+
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+  });
+};
+
+const formatHistoryDayLabel = (offsetDays: number): string => {
+  if (offsetDays <= 1) return "Yesterday";
+  if (offsetDays === 2) return "2 days ago";
+  return `${offsetDays} days ago`;
+};
+
 const formatAchievementDate = (value: string): string => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -2617,11 +2696,21 @@ const MiniRow = ({ entry, isSelf }: { entry: RowEntry; isSelf: boolean }) => {
   const timeClass =
     entry.status === "ok" ? "mini-time" : "mini-time muted status";
   const displayName = isSelf ? `${entry.username} (you)` : entry.username;
+  const isOnline = isEntryOnline(entry);
 
   return (
     <div className={`mini-row ${podiumClass}`}>
       <span className="mini-rank">{rankLabel}</span>
-      <span className="mini-name">{displayName}</span>
+      <span className="mini-name">
+        <span>{displayName}</span>
+        {isOnline && (
+          <span
+            className="presence-dot mini"
+            title="Online now"
+            aria-hidden="true"
+          />
+        )}
+      </span>
       <span className={timeClass}>{timeLabel ?? "—"}</span>
     </div>
   );
@@ -2641,6 +2730,7 @@ const BaseLeaderboardRow = ({
   const { rankLabel, podiumClass } = rankDisplay(entry.rank ?? null);
   const timeLabel = statusLabel(entry.status, entry.totalSeconds);
   const timeClass = entry.status === "ok" ? "time" : "time muted status";
+  const isOnline = isEntryOnline(entry);
   const subtitle = [entry.honorTitle ?? null, secondary]
     .filter((value): value is string => Boolean(value && value.trim().length > 0))
     .join(" • ");
@@ -2665,6 +2755,13 @@ const BaseLeaderboardRow = ({
         <div className="row-content">
           <div className="row-title">
             <span className="username-trigger">{entry.username}</span>
+            {isOnline && (
+              <span
+                className="presence-dot"
+                title="Online now"
+                aria-hidden="true"
+              />
+            )}
             {isSelf && <span className="badge">YOU</span>}
           </div>
           {subtitle && (

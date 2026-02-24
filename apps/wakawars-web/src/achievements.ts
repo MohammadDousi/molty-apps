@@ -60,7 +60,7 @@ export const buildAchievements = ({
   return [
     {
       id: "initiate",
-      title: "Waka Initiate",
+      title: "Arena Initiate",
       description: "Link your WakaTime token to join the arena.",
       icon: "XP",
       status: hasToken ? "unlocked" : "locked",
@@ -69,7 +69,7 @@ export const buildAchievements = ({
     },
     {
       id: "rival",
-      title: "First Rival",
+      title: "First Benchmark",
       description: "Add your first challenger.",
       icon: "R1",
       status: friendCount >= 1 ? "unlocked" : "in_progress",
@@ -78,7 +78,7 @@ export const buildAchievements = ({
     },
     {
       id: "squad",
-      title: "Squad Captain",
+      title: "Crew Lead",
       description: "Create a squad lineup.",
       icon: "SQ",
       status: groupCount >= 1 ? "unlocked" : "in_progress",
@@ -87,7 +87,7 @@ export const buildAchievements = ({
     },
     {
       id: "daily-grind",
-      title: "Daily Grinder",
+      title: "Daily Momentum",
       description: "Log 2 hours in a day.",
       icon: "D2",
       status:
@@ -107,7 +107,7 @@ export const buildAchievements = ({
     },
     {
       id: "weekly-pace",
-      title: "Weekly Pace",
+      title: "Weekly Rhythm",
       description: "Average 90 minutes per day.",
       icon: "WK",
       status:
@@ -127,7 +127,7 @@ export const buildAchievements = ({
     },
     {
       id: "podium",
-      title: "Podium Finisher",
+      title: "Top 3 Performer",
       description: "Place in the top 3.",
       icon: "TOP",
       status:
@@ -167,7 +167,7 @@ export const buildQuests = ({
   return [
     {
       id: "daily-spark",
-      title: "Daily Spark",
+      title: "Warmup Session",
       description: "Log 45 focused minutes.",
       status:
         dailyStatus === "locked"
@@ -205,7 +205,7 @@ export const buildQuests = ({
     },
     {
       id: "weekly-pace",
-      title: "Weekly Pace",
+      title: "Consistency Pace",
       description: "Hold 60 min/day average.",
       status:
         weeklyStatus === "locked"

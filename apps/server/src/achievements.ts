@@ -44,87 +44,75 @@ const DAILY_AVERAGE_10_HOURS = 10 * 60 * 60;
 export const ACHIEVEMENT_DEFINITIONS: AchievementDefinition[] = [
   {
     id: "quick-boot-4h",
-    title: "Quick Boot",
+    title: "Fast Start",
     description: "Log 4 focused hours in a day.",
     icon: "4H"
   },
   {
     id: "focus-reactor-6h",
-    title: "Focus Reactor",
+    title: "Deep Momentum",
     description: "Cross 6 hours in a day.",
     icon: "6H"
   },
   {
     id: "streak-forge-8h",
-    title: "Green Wall: Day One",
+    title: "Streak Ignited",
     description: "Drop 8 focused hours in a single day.",
     icon: "8H"
   },
   {
     id: "overclocked-core-10h",
-    title: "Overclocked Core",
+    title: "Overdrive Mode",
     description: "Pass 10 coding hours in one day.",
     icon: "10H"
   },
   {
     id: "merge-mountain-12h",
-    title: "Merge Mountain Prime",
+    title: "Peak Sprint",
     description: "Ship 12 hours in a single day.",
     icon: "12H"
   },
   {
     id: "night-shift-14h",
-    title: "Night Shift",
+    title: "Night Marathon",
     description: "Reach 14 hours in a single day.",
     icon: "14H"
   },
   {
     id: "legendary-commit-16h",
-    title: "Merge Overlord",
+    title: "Legendary Run",
     description: "Survive a 16-hour coding day.",
     icon: "16H"
   },
   {
     id: "boss-raid-20h",
-    title: "Boss Raid",
+    title: "Boss Marathon",
     description: "Survive a 20-hour marathon day.",
     icon: "20H"
   },
   {
     id: "weekend-warrior-8h",
-    title: "Weekend Warrior",
-    description: "Hit 8 hours on Saturday or Sunday.",
+    title: "Weekend Creator",
+    description: "Hit 8 hours on Friday, Saturday, or Sunday.",
     icon: "WKND"
   },
   {
     id: "weekend-overdrive-12h",
     title: "Weekend Overdrive",
-    description: "Hit 12 hours on Saturday or Sunday.",
+    description: "Hit 12 hours on Friday, Saturday, or Sunday.",
     icon: "WK12"
   },
   {
     id: "solo-day-8h",
-    title: "Solo Day",
+    title: "Solo Session",
     description: "Hit 8 daily hours using one editor.",
     icon: "1APP"
   },
   {
-    id: "switchblade-day-8h",
-    title: "Switchblade Day",
-    description: "Hit 8 daily hours while using 3+ editors.",
-    icon: "3APP"
-  },
-  {
     id: "mono-language-day-8h",
-    title: "Mono Language",
+    title: "Single Track",
     description: "Hit 8 daily hours using one language.",
     icon: "1LNG"
-  },
-  {
-    id: "language-juggler-day-8h",
-    title: "Language Juggler",
-    description: "Hit 8 daily hours across 4+ languages.",
-    icon: "4LNG"
   },
   {
     id: "deep-focus-day-8h",
@@ -134,81 +122,39 @@ export const ACHIEVEMENT_DEFINITIONS: AchievementDefinition[] = [
   },
   {
     id: "workweek-warrior-40h",
-    title: "Workweek Warrior",
+    title: "Week 40 Warrior",
     description: "Hit 40 hours in one week.",
     icon: "40W"
   },
   {
     id: "ship-it-60h",
-    title: "Ship It 60",
+    title: "Power Week 60",
     description: "Hit 60 hours in one week.",
     icon: "60W"
   },
   {
     id: "green-wall-80h",
-    title: "Green Wall Supreme",
+    title: "Wall Breaker 80",
     description: "Break the 80-hour weekly barrier.",
     icon: "80W"
   },
   {
     id: "graph-overflow-100h",
-    title: "Graph Overflow",
+    title: "Overflow 100",
     description: "Break 100 hours in one week.",
     icon: "100W"
   },
   {
     id: "matrix-120h",
-    title: "Matrix 120",
+    title: "Summit 120",
     description: "Reach 120 weekly hours.",
     icon: "120W"
   },
   {
-    id: "mono-stack-80h",
-    title: "Solo Stack Hero",
-    description: "Hit 80 weekly hours using only one editor.",
-    icon: "SOLO"
-  },
-  {
-    id: "mono-stack-100h",
-    title: "Solo Stack Mythic",
-    description: "Hit 100 weekly hours using one editor.",
-    icon: "SOLO+"
-  },
-  {
-    id: "polyglot-stack-80h",
-    title: "Polyglot Stack",
-    description: "Hit 80 weekly hours with 3+ editors.",
-    icon: "POLY"
-  },
-  {
-    id: "language-hydra-80h",
-    title: "Language Hydra",
-    description: "Hit 80 weekly hours across 5+ languages.",
-    icon: "LNG5"
-  },
-  {
-    id: "language-spectrum-80h",
-    title: "Language Spectrum",
-    description: "Hit 80 weekly hours across 8+ languages.",
-    icon: "LNG8"
-  },
-  {
-    id: "editor-arsenal-80h",
-    title: "Editor Arsenal",
-    description: "Hit 80 weekly hours while using 5+ editors.",
-    icon: "ED5"
-  },
-  {
     id: "project-monolith-80h",
-    title: "Project Monolith",
+    title: "Flagship Focus",
     description: "Hit 80 weekly hours with one project dominating your time.",
     icon: "MONO"
-  },
-  {
-    id: "project-nomad-80h",
-    title: "Project Nomad",
-    description: "Hit 80 weekly hours across 6+ projects.",
-    icon: "PRJ6"
   },
   {
     id: "seven-sunrise-week",
@@ -217,20 +163,14 @@ export const ACHIEVEMENT_DEFINITIONS: AchievementDefinition[] = [
     icon: "7D"
   },
   {
-    id: "iron-week-4h",
-    title: "Iron Week",
-    description: "Code at least 4 hours every day for a week.",
-    icon: "4HD"
-  },
-  {
     id: "marathon-pace-8h",
-    title: "Marathon Pace",
+    title: "Sustained Craft Pace",
     description: "Keep 8h/day average over a week.",
     icon: "AVG8"
   },
   {
     id: "ultra-pace-10h",
-    title: "Ultra Pace",
+    title: "Ultra Craft Pace",
     description: "Keep 10h/day average over a week.",
     icon: "AVG10"
   }
@@ -454,7 +394,7 @@ const isWeekendDateKey = (dateKey: string): boolean => {
 
   const date = new Date(Date.UTC(year, month - 1, day));
   const weekday = date.getUTCDay();
-  return weekday === 0 || weekday === 6;
+  return weekday === 5 || weekday === 6 || weekday === 0;
 };
 
 const grant = async ({
@@ -540,27 +480,11 @@ export const awardDailyAchievements = async ({
     });
   }
 
-  if (totalSeconds >= DAILY_8_HOURS && activeEditors.length >= 3) {
-    awards.push({
-      id: "switchblade-day-8h",
-      thresholdSeconds: DAILY_8_HOURS,
-      metadata: { editors: activeEditors }
-    });
-  }
-
   if (totalSeconds >= DAILY_8_HOURS && activeLanguages.length === 1) {
     awards.push({
       id: "mono-language-day-8h",
       thresholdSeconds: DAILY_8_HOURS,
       metadata: { language: activeLanguages[0] }
-    });
-  }
-
-  if (totalSeconds >= DAILY_8_HOURS && activeLanguages.length >= 4) {
-    awards.push({
-      id: "language-juggler-day-8h",
-      thresholdSeconds: DAILY_8_HOURS,
-      metadata: { languages: activeLanguages }
     });
   }
 
@@ -640,11 +564,6 @@ export const awardWeeklyAchievements = async ({
   );
   const weeklyDays = extractWeeklyDaySeconds(payload);
   const activeDayCount = weeklyDays.filter((seconds) => seconds > 0).length;
-  const strongDayCount = weeklyDays.filter(
-    (seconds) => seconds >= DAILY_4_HOURS
-  ).length;
-  const soloEditor = activeEditors.length === 1 ? activeEditors[0] : null;
-  const multiEditor = activeEditors.length >= 3;
   const topProjectShare =
     projectValues.length > 0 && totalSeconds > 0
       ? projectValues[0]!.seconds / totalSeconds
@@ -685,166 +604,6 @@ export const awardWeeklyAchievements = async ({
         }
       })
     ),
-    ...(totalSeconds >= WEEKLY_80_HOURS && soloEditor
-      ? [
-          grant({
-            store,
-            userId,
-            achievementId: "mono-stack-80h",
-            contextKind: "weekly",
-            contextKey,
-            awardedAt: fetchedAt,
-            metadata: {
-              totalSeconds,
-              thresholdSeconds: WEEKLY_80_HOURS,
-              dailyAverageSeconds,
-              rangeKey,
-              weekContextKey: contextKey,
-              editor: soloEditor
-            }
-          }),
-          ...(totalSeconds >= WEEKLY_100_HOURS
-            ? [
-                grant({
-                  store,
-                  userId,
-                  achievementId: "mono-stack-100h",
-                  contextKind: "weekly",
-                  contextKey,
-                  awardedAt: fetchedAt,
-                  metadata: {
-                    totalSeconds,
-                    thresholdSeconds: WEEKLY_100_HOURS,
-                    dailyAverageSeconds,
-                    rangeKey,
-                    weekContextKey: contextKey,
-                    editor: soloEditor
-                  }
-                })
-              ]
-            : [])
-        ]
-      : []),
-    ...(totalSeconds >= WEEKLY_80_HOURS && multiEditor
-      ? [
-          grant({
-            store,
-            userId,
-            achievementId: "polyglot-stack-80h",
-            contextKind: "weekly",
-            contextKey,
-            awardedAt: fetchedAt,
-            metadata: {
-              totalSeconds,
-              thresholdSeconds: WEEKLY_80_HOURS,
-              dailyAverageSeconds,
-              rangeKey,
-              weekContextKey: contextKey,
-              editors: activeEditors
-            }
-          }),
-          ...(activeLanguages.length >= 5
-            ? [
-                grant({
-                  store,
-                  userId,
-                  achievementId: "language-hydra-80h",
-                  contextKind: "weekly",
-                  contextKey,
-                  awardedAt: fetchedAt,
-                  metadata: {
-                    totalSeconds,
-                    thresholdSeconds: WEEKLY_80_HOURS,
-                    dailyAverageSeconds,
-                    rangeKey,
-                    weekContextKey: contextKey,
-                    languages: activeLanguages
-                  }
-                })
-              ]
-            : [])
-        ]
-      : []),
-    ...(totalSeconds >= WEEKLY_80_HOURS && activeLanguages.length >= 5 && !multiEditor
-      ? [
-          grant({
-            store,
-            userId,
-            achievementId: "language-hydra-80h",
-            contextKind: "weekly",
-            contextKey,
-            awardedAt: fetchedAt,
-            metadata: {
-              totalSeconds,
-              thresholdSeconds: WEEKLY_80_HOURS,
-              dailyAverageSeconds,
-              rangeKey,
-              weekContextKey: contextKey,
-              languages: activeLanguages
-            }
-          })
-        ]
-      : []),
-    ...(totalSeconds >= WEEKLY_80_HOURS && activeEditors.length >= 5
-      ? [
-          grant({
-            store,
-            userId,
-            achievementId: "editor-arsenal-80h",
-            contextKind: "weekly",
-            contextKey,
-            awardedAt: fetchedAt,
-            metadata: {
-              totalSeconds,
-              thresholdSeconds: WEEKLY_80_HOURS,
-              dailyAverageSeconds,
-              rangeKey,
-              weekContextKey: contextKey,
-              editors: activeEditors
-            }
-          })
-        ]
-      : []),
-    ...(totalSeconds >= WEEKLY_80_HOURS && activeLanguages.length >= 8
-      ? [
-          grant({
-            store,
-            userId,
-            achievementId: "language-spectrum-80h",
-            contextKind: "weekly",
-            contextKey,
-            awardedAt: fetchedAt,
-            metadata: {
-              totalSeconds,
-              thresholdSeconds: WEEKLY_80_HOURS,
-              dailyAverageSeconds,
-              rangeKey,
-              weekContextKey: contextKey,
-              languages: activeLanguages
-            }
-          })
-        ]
-      : []),
-    ...(totalSeconds >= WEEKLY_80_HOURS && activeProjects.length >= 6
-      ? [
-          grant({
-            store,
-            userId,
-            achievementId: "project-nomad-80h",
-            contextKind: "weekly",
-            contextKey,
-            awardedAt: fetchedAt,
-            metadata: {
-              totalSeconds,
-              thresholdSeconds: WEEKLY_80_HOURS,
-              dailyAverageSeconds,
-              rangeKey,
-              weekContextKey: contextKey,
-              projects: activeProjects
-            }
-          })
-        ]
-      : []),
     ...(totalSeconds >= WEEKLY_80_HOURS && topProjectShare >= 0.75
       ? [
           grant({
@@ -877,25 +636,6 @@ export const awardWeeklyAchievements = async ({
             awardedAt: fetchedAt,
             metadata: {
               activeDayCount,
-              dailyAverageSeconds,
-              rangeKey,
-              weekContextKey: contextKey
-            }
-          })
-        ]
-      : []),
-    ...(strongDayCount >= 7
-      ? [
-          grant({
-            store,
-            userId,
-            achievementId: "iron-week-4h",
-            contextKind: "weekly",
-            contextKey,
-            awardedAt: fetchedAt,
-            metadata: {
-              strongDayCount,
-              dayThresholdSeconds: DAILY_4_HOURS,
               dailyAverageSeconds,
               rangeKey,
               weekContextKey: contextKey

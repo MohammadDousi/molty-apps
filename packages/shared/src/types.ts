@@ -52,6 +52,7 @@ export type DailyStat = {
   totalSeconds: number;
   status: DailyStatStatus;
   error?: string | null;
+  isOnline?: boolean;
 };
 
 export type LeaderboardEntry = DailyStat & {
@@ -64,6 +65,18 @@ export type LeaderboardResponse = {
   updatedAt: string;
   entries: LeaderboardEntry[];
   selfEntry?: LeaderboardEntry | null;
+};
+
+export type DailyHistoryDay = {
+  date: string;
+  offsetDays: number;
+  updatedAt: string;
+  podium: LeaderboardEntry[];
+};
+
+export type DailyHistoryResponse = {
+  updatedAt: string;
+  days: DailyHistoryDay[];
 };
 
 export type WeeklyStat = {

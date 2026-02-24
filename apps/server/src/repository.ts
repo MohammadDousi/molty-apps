@@ -33,6 +33,12 @@ export type ProviderLogRecord = {
   fetchedAt: Date;
 };
 
+export type CodingStatusRecord = {
+  userId: number;
+  isCoding: boolean;
+  fetchedAt: Date;
+};
+
 export type AchievementContextKind = "daily" | "weekly";
 
 export type AchievementGrantRecord = {
@@ -141,6 +147,10 @@ export type UserRepository = {
     achievementIds?: string[];
     contextKind?: AchievementContextKind;
   }) => Promise<AchievementGrantSummary[]>;
+  getLatestCodingStatuses: (input: {
+    userIds: number[];
+    minFetchedAt?: Date;
+  }) => Promise<CodingStatusRecord[]>;
   createProviderLog: (input: ProviderLogRecord) => Promise<void>;
 };
 
@@ -212,6 +222,32 @@ const userInclude = {
     }
   }
 } as const;
+
+const readBoolean = (value: unknown): boolean | null =>
+  typeof value === "boolean" ? value : null;
+
+const extractCodingStateFromObject = (value: unknown): boolean | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  return readBoolean(record.is_coding) ?? readBoolean(record.isCoding);
+};
+
+const extractCodingStateFromPayload = (payload: Prisma.JsonValue | null): boolean | null => {
+  const rootState = extractCodingStateFromObject(payload);
+  if (rootState !== null) {
+    return rootState;
+  }
+
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+
+  const typedPayload = payload as Record<string, unknown>;
+  return extractCodingStateFromObject(typedPayload.data);
+};
 
 export const createPrismaRepository = (prisma: PrismaClient): UserRepository => {
   const countUsers = async () => prisma.ww_user.count();
@@ -850,6 +886,58 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     }));
   };
 
+  const getLatestCodingStatuses = async ({
+    userIds,
+    minFetchedAt
+  }: {
+    userIds: number[];
+    minFetchedAt?: Date;
+  }): Promise<CodingStatusRecord[]> => {
+    if (userIds.length === 0) {
+      return [];
+    }
+
+    const logs = await prisma.ww_provider_log.findMany({
+      where: {
+        provider: "wakatime",
+        endpoint: "status_bar/today",
+        ok: true,
+        user_id: { in: userIds },
+        ...(minFetchedAt ? { fetched_at: { gte: minFetchedAt } } : {})
+      },
+      select: {
+        user_id: true,
+        payload: true,
+        fetched_at: true
+      },
+      orderBy: [{ user_id: "asc" }, { fetched_at: "desc" }]
+    });
+
+    const seenUserIds = new Set<number>();
+    const statuses: CodingStatusRecord[] = [];
+
+    for (const log of logs) {
+      const userId = log.user_id;
+      if (userId == null || seenUserIds.has(userId)) {
+        continue;
+      }
+
+      const isCoding = extractCodingStateFromPayload(log.payload as Prisma.JsonValue | null);
+      if (isCoding === null) {
+        continue;
+      }
+
+      seenUserIds.add(userId);
+      statuses.push({
+        userId,
+        isCoding,
+        fetchedAt: log.fetched_at
+      });
+    }
+
+    return statuses;
+  };
+
   const createProviderLog = async ({
     provider,
     userId,
@@ -910,6 +998,7 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     grantAchievement,
     listAchievementUnlocks,
     listAchievementGrants,
+    getLatestCodingStatuses,
     createProviderLog
   };
 };

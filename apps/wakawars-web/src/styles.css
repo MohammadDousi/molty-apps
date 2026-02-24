@@ -540,6 +540,13 @@ h3 {
 
 .mini-name {
   font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mini-name > span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1155,6 +1162,26 @@ h3 {
   border: 2px solid var(--stroke);
 }
 
+.presence-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #31d57d;
+  border: 1px solid rgba(5, 42, 23, 0.65);
+  box-shadow:
+    0 0 0 2px rgba(10, 17, 28, 0.9),
+    0 0 10px rgba(49, 213, 125, 0.55);
+  flex-shrink: 0;
+}
+
+.presence-dot.mini {
+  width: 7px;
+  height: 7px;
+  box-shadow:
+    0 0 0 1px rgba(10, 17, 28, 0.85),
+    0 0 8px rgba(49, 213, 125, 0.5);
+}
+
 .row-sub {
   display: flex;
   gap: 8px;
@@ -1396,6 +1423,45 @@ input[type="password"]::placeholder {
   justify-content: flex-end;
   margin-left: auto;
   flex-shrink: 0;
+}
+
+.history-days {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-day {
+  border-radius: 12px;
+  border: 2px solid var(--stroke);
+  background: rgba(12, 18, 32, 0.7);
+  padding: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+:root[data-theme="light"] .history-day {
+  background: #ffffff;
+}
+
+.history-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.history-day-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.history-day-date {
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .visibility-grid {

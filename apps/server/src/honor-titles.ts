@@ -20,25 +20,15 @@ const TITLE_BY_ACHIEVEMENT_ID: Record<string, string> = {
   "weekend-warrior-8h": "Weekend Warrior",
   "weekend-overdrive-12h": "Weekend Overdrive",
   "solo-day-8h": "Solo Blade",
-  "switchblade-day-8h": "Switchblade",
   "mono-language-day-8h": "Mono Tongue",
-  "language-juggler-day-8h": "Language Juggler",
   "deep-focus-day-8h": "Deep Focus Diver",
   "workweek-warrior-40h": "Workweek Warrior",
   "ship-it-60h": "Release Captain",
   "green-wall-80h": "Green Wall Commander",
   "graph-overflow-100h": "Graph Breaker",
   "matrix-120h": "Matrix Sovereign",
-  "mono-stack-80h": "Solo Stack Hero",
-  "mono-stack-100h": "Solo Stack Mythic",
-  "polyglot-stack-80h": "Polyglot General",
-  "language-hydra-80h": "Language Hydra",
-  "language-spectrum-80h": "Spectrum Master",
-  "editor-arsenal-80h": "Editor Arsenal",
   "project-monolith-80h": "Monolith Architect",
-  "project-nomad-80h": "Project Nomad",
   "seven-sunrise-week": "Seven Sunrises",
-  "iron-week-4h": "Iron Week",
   "marathon-pace-8h": "Marathon Coder",
   "ultra-pace-10h": "Turbo Engine"
 };
@@ -55,25 +45,15 @@ const ACHIEVEMENT_PRIORITY: Record<string, number> = {
   "weekend-warrior-8h": 2,
   "weekend-overdrive-12h": 4,
   "solo-day-8h": 3,
-  "switchblade-day-8h": 4,
   "mono-language-day-8h": 4,
-  "language-juggler-day-8h": 5,
   "deep-focus-day-8h": 4,
   "workweek-warrior-40h": 5,
   "ship-it-60h": 6,
   "green-wall-80h": 7,
   "graph-overflow-100h": 9,
   "matrix-120h": 10,
-  "mono-stack-80h": 7,
-  "mono-stack-100h": 9,
-  "polyglot-stack-80h": 7,
-  "language-hydra-80h": 8,
-  "language-spectrum-80h": 9,
-  "editor-arsenal-80h": 8,
   "project-monolith-80h": 7,
-  "project-nomad-80h": 7,
   "seven-sunrise-week": 4,
-  "iron-week-4h": 6,
   "marathon-pace-8h": 7,
   "ultra-pace-10h": 8
 };
@@ -150,27 +130,6 @@ const resolveComboHonorTitle = ({
 
   if (getCount(achievementCounts, "green-wall-80h") >= 4) {
     return "Eternal Green Wall";
-  }
-
-  if (
-    getCount(achievementCounts, "language-spectrum-80h") >= 1 &&
-    getCount(achievementCounts, "editor-arsenal-80h") >= 1
-  ) {
-    return "Master of All Trades";
-  }
-
-  if (
-    getCount(achievementCounts, "mono-stack-100h") >= 1 &&
-    getCount(achievementCounts, "project-monolith-80h") >= 1
-  ) {
-    return "Solo Stack Titan";
-  }
-
-  if (
-    getCount(achievementCounts, "ultra-pace-10h") >= 2 &&
-    getCount(achievementCounts, "iron-week-4h") >= 2
-  ) {
-    return "Unstoppable Machine";
   }
 
   return null;

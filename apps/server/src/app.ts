@@ -7,6 +7,7 @@ import type {
   UserConfig,
   DailyStat,
   LeaderboardResponse,
+  DailyHistoryResponse,
   WeeklyStat,
   WeeklyLeaderboardResponse,
 } from "@molty/shared";
@@ -86,6 +87,8 @@ const normalizeFriendUsername = (value: string): string => {
     : withoutQuery;
   return normalizeUsername(lastSegment.replace(/^@/, ""));
 };
+
+const ONLINE_STATUS_TTL_MS = 10 * 60 * 1000;
 
 export const createServer = ({
   port,
@@ -203,6 +206,23 @@ export const createServer = ({
     const statsByUserId = new Map(
       dailyStats.map((stat) => [stat.userId, stat])
     );
+    const shouldIncludePresence = offsetDays === 0;
+    const onlineUserIds = new Set<number>();
+
+    if (shouldIncludePresence) {
+      const nowEpoch = baseDate.getTime();
+      const codingStatuses = await store.getLatestCodingStatuses({
+        userIds,
+        minFetchedAt: new Date(nowEpoch - ONLINE_STATUS_TTL_MS),
+      });
+
+      codingStatuses.forEach((status) => {
+        if (!status.isCoding) return;
+        if (nowEpoch - status.fetchedAt.getTime() > ONLINE_STATUS_TTL_MS) return;
+        onlineUserIds.add(status.userId);
+      });
+    }
+
     const incomingFriendIds = new Set(
       await store.getIncomingFriendIds(config.id, userIds)
     );
@@ -227,6 +247,7 @@ export const createServer = ({
           totalSeconds: 0,
           status: "private",
           error: null,
+          isOnline: false,
         };
       }
       if (!stat) {
@@ -236,6 +257,7 @@ export const createServer = ({
           totalSeconds: 0,
           status: "error",
           error: "No stats synced yet",
+          isOnline: false,
         };
       }
 
@@ -245,6 +267,10 @@ export const createServer = ({
         totalSeconds: stat.totalSeconds,
         status: stat.status,
         error: stat.error ?? null,
+        isOnline:
+          shouldIncludePresence &&
+          stat.status === "ok" &&
+          onlineUserIds.has(user.id),
       };
     };
 
@@ -285,6 +311,36 @@ export const createServer = ({
     };
 
     return response;
+  };
+
+  const buildDailyHistory = async (
+    config: UserConfig,
+    days: number
+  ): Promise<DailyHistoryResponse> => {
+    const offsets = Array.from({ length: days }, (_, index) => -(index + 1));
+    const leaderboards = await Promise.all(
+      offsets.map((offset) => buildDailyLeaderboard(config, offset))
+    );
+    const updatedAtEpoch = leaderboards.length
+      ? Math.max(
+          ...leaderboards.map((entry) => {
+            const parsed = Date.parse(entry.updatedAt);
+            return Number.isNaN(parsed) ? 0 : parsed;
+          })
+        )
+      : Date.now();
+
+    return {
+      updatedAt: new Date(updatedAtEpoch || Date.now()).toISOString(),
+      days: leaderboards.map((entry, index) => ({
+        date: entry.date,
+        offsetDays: Math.abs(offsets[index] ?? 0),
+        updatedAt: entry.updatedAt,
+        podium: entry.entries
+          .filter((candidate) => typeof candidate.rank === "number")
+          .slice(0, 3),
+      })),
+    };
   };
 
   const canViewUserStats = async ({
@@ -903,6 +959,25 @@ export const createServer = ({
           }
 
           return buildDailyLeaderboard(config, -1);
+        })
+        .get("/stats/history", async ({ set, headers }) => {
+          const authCheck = await requireSession(headers, set);
+          if (!authCheck.ok) {
+            return { error: "Unauthorized" };
+          }
+
+          const config = await store.getUserById(authCheck.user.id);
+          if (!config) {
+            set.status = 401;
+            return { error: "Unauthorized" };
+          }
+
+          if (!config.wakawarsUsername || !config.apiKey) {
+            set.status = 400;
+            return { error: "App is not configured" };
+          }
+
+          return buildDailyHistory(config, 7);
         })
         .post("/stats/refresh", async ({ set, headers }) => {
           const authCheck = await requireSession(headers, set);
