@@ -1,6 +1,7 @@
 import type { UserRepository } from "./repository.js";
 import type { WakaTimeClient } from "./wakatime.js";
-import { toDateKeyInTimeZone } from "./date-key.js";
+import { computeLeaderboard, getDailyRankRewardCoins, type DailyStat } from "@molty/shared";
+import { shiftDateKey, toDateKeyInTimeZone } from "./date-key.js";
 import { awardDailyAchievements } from "./achievements.js";
 import {
   DEFAULT_WAKATIME_BATCH_DELAY_MS,
@@ -58,6 +59,133 @@ export const createWakaTimeSync = ({
     }
 
     return toDateKeyInTimeZone(new Date(), input.timeZone ?? null);
+  };
+
+  const resolveYesterdayDateKey = (
+    input: { timeZone?: string | null },
+    baseDate: Date
+  ) => {
+    const today = toDateKeyInTimeZone(baseDate, input.timeZone ?? null);
+    return shiftDateKey(today, -1);
+  };
+
+  const settleDailyRankRewards = async (baseDate: Date) => {
+    const users = await store.listUsers();
+    const settledAt = new Date();
+
+    for (const listedUser of users) {
+      try {
+        const config = await store.getUserById(listedUser.id);
+        if (!config) {
+          continue;
+        }
+
+        const dateKey = resolveYesterdayDateKey(
+          { timeZone: config.wakatimeTimezone ?? null },
+          baseDate
+        );
+        const groupPeerIds = new Set(await store.getGroupPeerIds(config.id));
+        const friendIds = new Set(config.friends.map((friend) => friend.id));
+        const userIds = Array.from(
+          new Set([config.id, ...friendIds, ...groupPeerIds])
+        );
+        const userRecords = await store.getUsersByIds(userIds);
+        const usersById = new Map(userRecords.map((user) => [user.id, user]));
+        const boardUsers = userIds
+          .map((id) => usersById.get(id))
+          .filter((user): user is NonNullable<typeof user> => Boolean(user));
+
+        const dateKeyGroups = new Map<string, number[]>();
+        boardUsers.forEach((user) => {
+          const userDateKey = resolveYesterdayDateKey(
+            { timeZone: user.wakatimeTimezone ?? null },
+            baseDate
+          );
+          const existing = dateKeyGroups.get(userDateKey);
+          if (existing) {
+            existing.push(user.id);
+          } else {
+            dateKeyGroups.set(userDateKey, [user.id]);
+          }
+        });
+
+        const dailyStats = (
+          await Promise.all(
+            Array.from(dateKeyGroups.entries()).map(([key, ids]) =>
+              store.getDailyStats({ userIds: ids, dateKey: key })
+            )
+          )
+        ).flat();
+        const statsByUserId = new Map(dailyStats.map((stat) => [stat.userId, stat]));
+        const incomingFriendIds = new Set(
+          await store.getIncomingFriendIds(config.id, userIds)
+        );
+
+        const buildDailyStat = (
+          user: (typeof boardUsers)[number],
+          isSelf: boolean
+        ): DailyStat => {
+          const stat = statsByUserId.get(user.id);
+          const isMutualFriend =
+            friendIds.has(user.id) && incomingFriendIds.has(user.id);
+          const isGroupConnected = groupPeerIds.has(user.id);
+          const canView =
+            isSelf ||
+            user.statsVisibility === "everyone" ||
+            (user.statsVisibility === "friends" &&
+              (isMutualFriend || isGroupConnected));
+
+          if (!canView) {
+            return {
+              username: user.wakawarsUsername,
+              totalSeconds: 0,
+              status: "private",
+              equippedSkinId: user.equippedSkinId ?? null,
+              error: null
+            };
+          }
+
+          if (!stat) {
+            return {
+              username: user.wakawarsUsername,
+              totalSeconds: 0,
+              status: "error",
+              equippedSkinId: user.equippedSkinId ?? null,
+              error: "No stats synced yet"
+            };
+          }
+
+          return {
+            username: user.wakawarsUsername,
+            totalSeconds: stat.totalSeconds,
+            status: stat.status,
+            equippedSkinId: user.equippedSkinId ?? null,
+            error: stat.error ?? null
+          };
+        };
+
+        const leaderboardUsers = boardUsers.filter((user) => user.isCompeting);
+        const stats = leaderboardUsers.map((user) =>
+          buildDailyStat(user, user.id === config.id)
+        );
+        const computedEntries = computeLeaderboard(stats, config.wakawarsUsername);
+        const selfEntry = computedEntries.find(
+          (entry) => entry.username === config.wakawarsUsername
+        );
+        const rank = selfEntry?.rank ?? null;
+        const coinsAwarded = getDailyRankRewardCoins(rank);
+
+        await store.settleDailyReward({
+          userId: config.id,
+          dateKey,
+          rank,
+          coinsAwarded,
+          settledAt
+        });
+      } catch (error) {
+        reportError(error);
+      }
+    }
   };
 
   const runOnce = async () => {
@@ -135,6 +263,8 @@ export const createWakaTimeSync = ({
           onError: reportError
         }
       );
+
+      await settleDailyRankRewards(new Date());
     } catch (error) {
       reportError(error);
     } finally {

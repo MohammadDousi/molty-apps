@@ -1,6 +1,14 @@
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
-import type { DailyStatStatus, StatsVisibility, UserConfig } from "@molty/shared";
+import type {
+  DailyStatStatus,
+  PurchasableSkinId,
+  SkinCatalogItem,
+  SkinId,
+  StatsVisibility,
+  UserConfig,
+  WalletTransactionReason
+} from "@molty/shared";
 
 export type DailyStatRecord = {
   userId: number;
@@ -33,6 +41,14 @@ export type ProviderLogRecord = {
   fetchedAt: Date;
 };
 
+export type CoinTransactionRecord = {
+  id: number;
+  amount: number;
+  reason: WalletTransactionReason;
+  metadata: unknown | null;
+  createdAt: Date;
+};
+
 export type AchievementContextKind = "daily" | "weekly";
 
 export type AchievementGrantRecord = {
@@ -50,6 +66,13 @@ export type AchievementUnlockSummary = {
   firstAwardedAt: Date;
   lastAwardedAt: Date;
 };
+
+export type PurchaseSkinResult =
+  | "purchased"
+  | "already_owned"
+  | "insufficient_funds"
+  | "skin_not_found"
+  | "user_not_found";
 
 export type UserRepository = {
   countUsers: () => Promise<number>;
@@ -69,6 +92,8 @@ export type UserRepository = {
       wakawarsUsername: string;
       statsVisibility: StatsVisibility;
       isCompeting: boolean;
+      coinBalance?: number;
+      equippedSkinId: SkinId | null;
       wakatimeTimezone?: string | null;
     }>
   >;
@@ -124,6 +149,30 @@ export type UserRepository = {
     userIds: number[];
     rangeKey: string;
   }) => Promise<WeeklyStatRecord[]>;
+  getWallet: (input: {
+    userId: number;
+    limit?: number;
+  }) => Promise<{
+    coinBalance: number;
+    equippedSkinId: SkinId | null;
+    transactions: CoinTransactionRecord[];
+  } | null>;
+  listSkinCatalog: () => Promise<SkinCatalogItem[]>;
+  getSkinCatalogItemById: (skinId: string) => Promise<SkinCatalogItem | null>;
+  listOwnedSkinIds: (userId: number) => Promise<SkinId[]>;
+  purchaseSkin: (input: {
+    userId: number;
+    skinId: PurchasableSkinId;
+    purchasedAt: Date;
+  }) => Promise<PurchaseSkinResult>;
+  setEquippedSkin: (userId: number, skinId: SkinId | null) => Promise<UserConfig>;
+  settleDailyReward: (input: {
+    userId: number;
+    dateKey: string;
+    rank: number | null;
+    coinsAwarded: number;
+    settledAt: Date;
+  }) => Promise<{ applied: boolean; coinBalance: number | null }>;
   grantAchievement: (input: AchievementGrantRecord) => Promise<void>;
   listAchievementUnlocks: (input: {
     userId: number;
@@ -139,6 +188,8 @@ type PrismaUser = {
   password_hash: string | null;
   stats_visibility: StatsVisibility;
   is_competing: boolean;
+  coin_balance: number;
+  equipped_skin_id: string | null;
   friendships: Array<{
     friend_id: number;
     friend: {
@@ -167,6 +218,8 @@ const mapUserToConfig = (user: PrismaUser): UserConfig => ({
   wakatimeTimezone: user.wakatime_timezone ?? null,
   statsVisibility: user.stats_visibility,
   isCompeting: user.is_competing,
+  coinBalance: user.coin_balance,
+  equippedSkinId: (user.equipped_skin_id as SkinId | null) ?? null,
   passwordHash: user.password_hash,
   friends: user.friendships.map((friendship) => ({
     id: friendship.friend_id,
@@ -200,6 +253,13 @@ const userInclude = {
   }
 } as const;
 
+const toPrismaJson = (value: unknown | null | undefined) =>
+  value === undefined
+    ? undefined
+    : value === null
+      ? Prisma.DbNull
+      : (value as Prisma.InputJsonValue);
+
 export const createPrismaRepository = (prisma: PrismaClient): UserRepository => {
   const countUsers = async () => prisma.ww_user.count();
 
@@ -231,6 +291,8 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
         wakawars_username: true,
         stats_visibility: true,
         is_competing: true,
+        coin_balance: true,
+        equipped_skin_id: true,
         wakatime_timezone: true
       }
     });
@@ -240,6 +302,8 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
       wakawarsUsername: user.wakawars_username,
       statsVisibility: user.stats_visibility as StatsVisibility,
       isCompeting: Boolean(user.is_competing),
+      coinBalance: user.coin_balance,
+      equippedSkinId: (user.equipped_skin_id as SkinId | null) ?? null,
       wakatimeTimezone: user.wakatime_timezone ?? null
     }));
   };
@@ -725,6 +789,309 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     }));
   };
 
+  const getWallet = async ({
+    userId,
+    limit = 20
+  }: {
+    userId: number;
+    limit?: number;
+  }) => {
+    const user = await prisma.ww_user.findUnique({
+      where: { id: userId },
+      select: {
+        coin_balance: true,
+        equipped_skin_id: true,
+        coin_ledger: {
+          orderBy: { created_at: "desc" },
+          take: limit,
+          select: {
+            id: true,
+            amount: true,
+            reason: true,
+            metadata: true,
+            created_at: true
+          }
+        }
+      }
+    });
+
+    if (!user) {
+      return null;
+    }
+
+    return {
+      coinBalance: user.coin_balance,
+      equippedSkinId: (user.equipped_skin_id as SkinId | null) ?? null,
+      transactions: user.coin_ledger.map((entry) => ({
+        id: entry.id,
+        amount: entry.amount,
+        reason: entry.reason as WalletTransactionReason,
+        metadata: entry.metadata,
+        createdAt: entry.created_at
+      }))
+    };
+  };
+
+  const listSkinCatalog = async (): Promise<SkinCatalogItem[]> => {
+    const skins = await prisma.ww_skin_catalog.findMany({
+      where: {
+        is_active: true
+      },
+      orderBy: [
+        { sort_order: "asc" },
+        { created_at: "asc" }
+      ],
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        price_coins: true
+      }
+    });
+
+    return skins.map((skin) => ({
+      id: skin.id,
+      name: skin.name,
+      description: skin.description,
+      priceCoins: skin.price_coins
+    }));
+  };
+
+  const getSkinCatalogItemById = async (
+    skinId: string
+  ): Promise<SkinCatalogItem | null> => {
+    const normalizedSkinId = skinId.trim().toLowerCase();
+    if (!normalizedSkinId) {
+      return null;
+    }
+
+    const skin = await prisma.ww_skin_catalog.findFirst({
+      where: {
+        id: normalizedSkinId,
+        is_active: true
+      },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        price_coins: true
+      }
+    });
+
+    if (!skin) {
+      return null;
+    }
+
+    return {
+      id: skin.id,
+      name: skin.name,
+      description: skin.description,
+      priceCoins: skin.price_coins
+    };
+  };
+
+  const listOwnedSkinIds = async (userId: number): Promise<SkinId[]> => {
+    const owned = await prisma.ww_user_skin.findMany({
+      where: { user_id: userId },
+      select: { skin_id: true }
+    });
+
+    return owned.map((entry) => entry.skin_id as SkinId);
+  };
+
+  const purchaseSkin = async ({
+    userId,
+    skinId,
+    purchasedAt
+  }: {
+    userId: number;
+    skinId: PurchasableSkinId;
+    purchasedAt: Date;
+  }): Promise<PurchaseSkinResult> => {
+    const normalizedSkinId = skinId.trim().toLowerCase();
+    if (!normalizedSkinId) {
+      return "skin_not_found";
+    }
+
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const user = await tx.ww_user.findUnique({
+          where: { id: userId },
+          select: {
+            id: true,
+            coin_balance: true
+          }
+        });
+        if (!user) {
+          return "user_not_found";
+        }
+
+        const selectedSkin = await tx.ww_skin_catalog.findFirst({
+          where: {
+            id: normalizedSkinId,
+            is_active: true
+          },
+          select: {
+            price_coins: true
+          }
+        });
+        if (!selectedSkin) {
+          return "skin_not_found";
+        }
+
+        const normalizedPrice = Math.max(0, Math.trunc(selectedSkin.price_coins));
+        const existing = await tx.ww_user_skin.findUnique({
+          where: {
+            user_id_skin_id: {
+              user_id: userId,
+              skin_id: normalizedSkinId
+            }
+          },
+          select: { id: true }
+        });
+        if (existing) {
+          return "already_owned";
+        }
+
+        if (user.coin_balance < normalizedPrice) {
+          return "insufficient_funds";
+        }
+
+        await tx.ww_user_skin.create({
+          data: {
+            user_id: userId,
+            skin_id: normalizedSkinId,
+            purchased_at: purchasedAt
+          }
+        });
+
+        await tx.ww_user.update({
+          where: { id: userId },
+          data: {
+            coin_balance: {
+              decrement: normalizedPrice
+            }
+          }
+        });
+
+        await tx.ww_coin_ledger.create({
+          data: {
+            user_id: userId,
+            amount: -normalizedPrice,
+            reason: "skin_purchase",
+            metadata: toPrismaJson({
+              skinId: normalizedSkinId,
+              priceCoins: normalizedPrice
+            }),
+            created_at: purchasedAt
+          }
+        });
+
+        return "purchased";
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        return "already_owned";
+      }
+      throw error;
+    }
+  };
+
+  const setEquippedSkin = async (userId: number, skinId: SkinId | null) => {
+    const user = await prisma.ww_user.update({
+      where: { id: userId },
+      data: {
+        equipped_skin_id: skinId
+      },
+      include: userInclude
+    });
+
+    return mapUserToConfig(user as PrismaUser);
+  };
+
+  const settleDailyReward = async ({
+    userId,
+    dateKey,
+    rank,
+    coinsAwarded,
+    settledAt
+  }: {
+    userId: number;
+    dateKey: string;
+    rank: number | null;
+    coinsAwarded: number;
+    settledAt: Date;
+  }): Promise<{ applied: boolean; coinBalance: number | null }> => {
+    const normalizedCoins = Math.max(0, Math.trunc(coinsAwarded));
+
+    try {
+      const coinBalance = await prisma.$transaction(async (tx) => {
+        await tx.ww_daily_reward_settlement.create({
+          data: {
+            user_id: userId,
+            date_key: dateKey,
+            rank,
+            coins_awarded: normalizedCoins,
+            created_at: settledAt
+          }
+        });
+
+        if (normalizedCoins <= 0) {
+          const user = await tx.ww_user.findUnique({
+            where: { id: userId },
+            select: { coin_balance: true }
+          });
+
+          return user?.coin_balance ?? null;
+        }
+
+        const updated = await tx.ww_user.update({
+          where: { id: userId },
+          data: {
+            coin_balance: {
+              increment: normalizedCoins
+            }
+          },
+          select: { coin_balance: true }
+        });
+
+        await tx.ww_coin_ledger.create({
+          data: {
+            user_id: userId,
+            amount: normalizedCoins,
+            reason: "daily_rank_reward",
+            metadata: toPrismaJson({
+              dateKey,
+              rank
+            }),
+            created_at: settledAt
+          }
+        });
+
+        return updated.coin_balance;
+      });
+
+      return {
+        applied: true,
+        coinBalance
+      };
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        return {
+          applied: false,
+          coinBalance: null
+        };
+      }
+      throw error;
+    }
+  };
+
   const grantAchievement = async ({
     userId,
     achievementId,
@@ -748,21 +1115,11 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
         context_kind: contextKind,
         context_key: contextKey,
         awarded_at: awardedAt,
-        metadata:
-          metadata === undefined
-            ? undefined
-            : metadata === null
-              ? Prisma.DbNull
-              : (metadata as Prisma.InputJsonValue)
+        metadata: toPrismaJson(metadata)
       },
       update: {
         awarded_at: awardedAt,
-        metadata:
-          metadata === undefined
-            ? undefined
-            : metadata === null
-              ? Prisma.DbNull
-              : (metadata as Prisma.InputJsonValue)
+        metadata: toPrismaJson(metadata)
       }
     });
   };
@@ -817,12 +1174,7 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
         range_key: rangeKey ?? null,
         status_code: statusCode ?? null,
         ok,
-        payload:
-          payload === undefined
-            ? undefined
-            : payload === null
-              ? Prisma.DbNull
-              : (payload as Prisma.InputJsonValue),
+        payload: toPrismaJson(payload),
         error: error ?? null,
         fetched_at: fetchedAt
       }
@@ -855,6 +1207,13 @@ export const createPrismaRepository = (prisma: PrismaClient): UserRepository => 
     getDailyStats,
     upsertWeeklyStat,
     getWeeklyStats,
+    getWallet,
+    listSkinCatalog,
+    getSkinCatalogItemById,
+    listOwnedSkinIds,
+    purchaseSkin,
+    setEquippedSkin,
+    settleDailyReward,
     grantAchievement,
     listAchievementUnlocks,
     createProviderLog
