@@ -7,8 +7,10 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type CSSProperties,
   type FormEvent,
+  type ReactNode,
   type RefObject,
 } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   formatDuration,
   computeLeaderboard,
@@ -149,6 +151,74 @@ const HomeHeaderIcon = () => (
   </svg>
 );
 
+const motionEase = [0.22, 1, 0.36, 1] as const;
+
+const getMotionDuration = (
+  reduceMotion: boolean | null | undefined,
+  value: number
+): number =>
+  reduceMotion ? 0.01 : value;
+
+type MotionPanelProps = {
+  className?: string;
+  children: ReactNode;
+  delay?: number;
+};
+
+const MotionPanel = ({ className, children, delay = 0 }: MotionPanelProps) => {
+  const reduceMotion = useReducedMotion();
+
+  return (
+    <motion.section
+      layout
+      className={className ? `panel ${className}` : "panel"}
+      initial={{
+        opacity: 0,
+        y: reduceMotion ? 0 : 14,
+        scale: reduceMotion ? 1 : 0.99,
+      }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{
+        opacity: 0,
+        y: reduceMotion ? 0 : -10,
+        scale: reduceMotion ? 1 : 0.99,
+      }}
+      transition={{
+        duration: getMotionDuration(reduceMotion, 0.32),
+        delay: reduceMotion ? 0 : delay,
+        ease: motionEase,
+      }}
+    >
+      {children}
+    </motion.section>
+  );
+};
+
+type MotionViewProps = {
+  viewKey: string;
+  children: ReactNode;
+};
+
+const MotionView = ({ viewKey, children }: MotionViewProps) => {
+  const reduceMotion = useReducedMotion();
+
+  return (
+    <motion.div
+      key={viewKey}
+      className="view-stack"
+      initial={{ opacity: 0, y: reduceMotion ? 0 : 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: reduceMotion ? 0 : -8 }}
+      transition={{
+        duration: getMotionDuration(reduceMotion, 0.24),
+        ease: motionEase,
+      }}
+    >
+      {children}
+    </motion.div>
+  );
+};
+
 type AddFriendCardProps = {
   docked?: boolean;
   dismissible?: boolean;
@@ -170,9 +240,7 @@ const AddFriendCard = ({
   loading,
   errorMessage,
 }: AddFriendCardProps) => (
-  <section
-    className={`panel add-friend-card ${docked ? "add-friend-dock" : ""}`}
-  >
+  <MotionPanel className={`add-friend-card ${docked ? "add-friend-dock" : ""}`}>
     <div className="panel-head">
       <div>
         <p className="eyebrow">Recruit</p>
@@ -202,11 +270,24 @@ const AddFriendCard = ({
         Recruit
       </button>
     </form>
-    {errorMessage && <p className="form-error">{errorMessage}</p>}
-  </section>
+    <AnimatePresence initial={false}>
+      {errorMessage && (
+        <motion.p
+          className="form-error"
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          transition={{ duration: 0.18, ease: "easeOut" }}
+        >
+          {errorMessage}
+        </motion.p>
+      )}
+    </AnimatePresence>
+  </MotionPanel>
 );
 
 const App = () => {
+  const reduceMotion = useReducedMotion();
   const [apiBase, setApiBase] = useState<string | null>(null);
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [stats, setStats] = useState<LeaderboardResponse | null>(null);
@@ -1578,7 +1659,15 @@ const App = () => {
   if (showMainLoading) {
     return (
       <div className="app">
-        <header className="header">
+        <motion.header
+          className="header"
+          initial={{ opacity: 0, y: reduceMotion ? 0 : -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{
+            duration: getMotionDuration(reduceMotion, 0.26),
+            ease: motionEase,
+          }}
+        >
           <div className="app-brand">
             <span
               className="app-brand-icon"
@@ -1596,16 +1685,27 @@ const App = () => {
             </div>
           </div>
           <div className="header-meta">{updateButton}</div>
-        </header>
-        {error && (
-          <div className="error">
-            <span>{error}</span>
-            <button className="ghost tiny" onClick={handleRetry}>
-              Retry
-            </button>
-          </div>
-        )}
-        <section className="panel">
+        </motion.header>
+        <AnimatePresence initial={false}>
+          {error && (
+            <motion.div
+              className="error"
+              initial={{ opacity: 0, y: reduceMotion ? 0 : -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: reduceMotion ? 0 : -6 }}
+              transition={{
+                duration: getMotionDuration(reduceMotion, 0.2),
+                ease: motionEase,
+              }}
+            >
+              <span>{error}</span>
+              <button className="ghost tiny" onClick={handleRetry}>
+                Retry
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        <MotionPanel>
           <div className="panel-head">
             <div>
               <p className="eyebrow">Session</p>
@@ -1614,7 +1714,7 @@ const App = () => {
             </div>
           </div>
           <div className="loading-shimmer" aria-hidden="true" />
-        </section>
+        </MotionPanel>
       </div>
     );
   }
@@ -1622,7 +1722,15 @@ const App = () => {
   if (!session) {
     return (
       <div className="app">
-        <header className="header">
+        <motion.header
+          className="header"
+          initial={{ opacity: 0, y: reduceMotion ? 0 : -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{
+            duration: getMotionDuration(reduceMotion, 0.26),
+            ease: motionEase,
+          }}
+        >
           <div className="app-brand">
             <span
               className="app-brand-icon"
@@ -1640,8 +1748,8 @@ const App = () => {
             </div>
           </div>
           <div className="header-meta">{updateButton}</div>
-        </header>
-        <section className="panel">
+        </motion.header>
+        <MotionPanel>
           <div className="panel-head">
             <div>
               <p className="eyebrow">Loading</p>
@@ -1650,7 +1758,7 @@ const App = () => {
             </div>
           </div>
           <div className="loading-shimmer" aria-hidden="true" />
-        </section>
+        </MotionPanel>
       </div>
     );
   }
@@ -1665,92 +1773,118 @@ const App = () => {
 
   return (
     <div className={`app ${showDockedAdd ? "has-docked-add" : ""}`}>
-      {!showWelcome && (
-        <header className="header">
-          <div className="app-brand">
-            <span
-              className="app-brand-icon"
-              role="img"
-              aria-label="WakaWars logo"
-            >
+      <AnimatePresence initial={false}>
+        {!showWelcome && (
+          <motion.header
+            className="header"
+            key="main-header"
+            initial={{ opacity: 0, y: reduceMotion ? 0 : -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: reduceMotion ? 0 : -10 }}
+            transition={{
+              duration: getMotionDuration(reduceMotion, 0.26),
+              ease: motionEase,
+            }}
+          >
+            <div className="app-brand">
               <span
-                className="app-brand-mark logo-mask"
-                style={logoMaskStyle}
-              />
-            </span>
-            <div className="brand-copy">
-              <span className="brand-title">WakaWars</span>
-              <span className="brand-sub">{headerSubtitle}</span>
+                className="app-brand-icon"
+                role="img"
+                aria-label="WakaWars logo"
+              >
+                <span
+                  className="app-brand-mark logo-mask"
+                  style={logoMaskStyle}
+                />
+              </span>
+              <div className="brand-copy">
+                <span className="brand-title">WakaWars</span>
+                <span className="brand-sub">{headerSubtitle}</span>
+              </div>
             </div>
-          </div>
-          <div className="header-meta">
-            {updateButton}
-            {showHomeButton && (
-              <button
-                type="button"
-                className="icon-button ghost-button"
-                onClick={() => setActiveTab("league")}
-                aria-label="Back to home"
-                title="Back to home"
-              >
-                <HomeHeaderIcon />
-              </button>
-            )}
-            {!showHomeButton && canRefresh && (
-              <button
-                type="button"
-                className="icon-button ghost-button"
-                onClick={handleRefresh}
-                disabled={refreshing || loading}
-                aria-label={refreshing ? "Refreshing stats" : "Refresh stats"}
-              >
-                ↻
-              </button>
-            )}
-            {canShowControlTabs && (
-              <button
-                type="button"
-                className={`icon-button ghost-button ${
-                  activeTab === "achievements" ? "active" : ""
-                }`}
-                onClick={openAchievementsPage}
-                aria-label="Achievements"
-                title="Open achievements"
-              >
-                <AchievementHeaderIcon />
-              </button>
-            )}
-            {canShowControlTabs && (
-              <button
-                type="button"
-                className={`icon-button ghost-button ${
-                  activeTab === "settings" ? "active" : ""
-                }`}
-                onClick={() =>
-                  setActiveTab((prev) =>
-                    prev === "settings" ? "league" : "settings"
-                  )
-                }
-                aria-label="Settings"
-              >
-                ⚙︎
-              </button>
-            )}
-          </div>
-        </header>
-      )}
+            <div className="header-meta">
+              {updateButton}
+              {showHomeButton && (
+                <button
+                  type="button"
+                  className="icon-button ghost-button"
+                  onClick={() => setActiveTab("league")}
+                  aria-label="Back to home"
+                  title="Back to home"
+                >
+                  <HomeHeaderIcon />
+                </button>
+              )}
+              {!showHomeButton && canRefresh && (
+                <button
+                  type="button"
+                  className="icon-button ghost-button"
+                  onClick={handleRefresh}
+                  disabled={refreshing || loading}
+                  aria-label={refreshing ? "Refreshing stats" : "Refresh stats"}
+                >
+                  ↻
+                </button>
+              )}
+              {canShowControlTabs && (
+                <button
+                  type="button"
+                  className={`icon-button ghost-button ${
+                    activeTab === "achievements" ? "active" : ""
+                  }`}
+                  onClick={openAchievementsPage}
+                  aria-label="Achievements"
+                  title="Open achievements"
+                >
+                  <AchievementHeaderIcon />
+                </button>
+              )}
+              {canShowControlTabs && (
+                <button
+                  type="button"
+                  className={`icon-button ghost-button ${
+                    activeTab === "settings" ? "active" : ""
+                  }`}
+                  onClick={() =>
+                    setActiveTab((prev) =>
+                      prev === "settings" ? "league" : "settings"
+                    )
+                  }
+                  aria-label="Settings"
+                >
+                  ⚙︎
+                </button>
+              )}
+            </div>
+          </motion.header>
+        )}
+      </AnimatePresence>
 
-      {error && (
-        <div className="error">
-          <span>{error}</span>
-          <button className="ghost tiny" onClick={handleRetry}>
-            Retry
-          </button>
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {error && (
+          <motion.div
+            className="error"
+            key={`error-${error}`}
+            initial={{ opacity: 0, y: reduceMotion ? 0 : -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: reduceMotion ? 0 : -8 }}
+            transition={{
+              duration: getMotionDuration(reduceMotion, 0.2),
+              ease: motionEase,
+            }}
+          >
+            <span>{error}</span>
+            <button className="ghost tiny" onClick={handleRetry}>
+              Retry
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {showWelcome ? (
-        <section className="panel hero-panel">
+      <AnimatePresence mode="wait" initial={false}>
+        {showWelcome ? (
+          <MotionView viewKey="welcome">
+        <MotionPanel className="hero-panel">
           <div className="hero-center">
             <div className="app-logo" aria-hidden="true">
               <span
@@ -1784,26 +1918,55 @@ const App = () => {
             </button>
           </div>
           <div className="feature-grid">
-            <div className="feature-card">
+            <motion.div
+              className="feature-card"
+              initial={{ opacity: 0, y: reduceMotion ? 0 : 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{
+                duration: getMotionDuration(reduceMotion, 0.22),
+                delay: reduceMotion ? 0 : 0.05,
+                ease: motionEase,
+              }}
+            >
               <h3>Daily skirmishes</h3>
               <p className="muted">
                 See who leads today in minutes, not noise.
               </p>
-            </div>
-            <div className="feature-card">
+            </motion.div>
+            <motion.div
+              className="feature-card"
+              initial={{ opacity: 0, y: reduceMotion ? 0 : 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{
+                duration: getMotionDuration(reduceMotion, 0.22),
+                delay: reduceMotion ? 0 : 0.11,
+                ease: motionEase,
+              }}
+            >
               <h3>Weekly crowns</h3>
               <p className="muted">Track the long game with weekly averages.</p>
-            </div>
-            <div className="feature-card">
+            </motion.div>
+            <motion.div
+              className="feature-card"
+              initial={{ opacity: 0, y: reduceMotion ? 0 : 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{
+                duration: getMotionDuration(reduceMotion, 0.22),
+                delay: reduceMotion ? 0 : 0.17,
+                ease: motionEase,
+              }}
+            >
               <h3>Local-first</h3>
               <p className="muted">
                 No logins, no cloud accounts, just your data.
               </p>
-            </div>
+            </motion.div>
           </div>
-        </section>
-      ) : showSignIn ? (
-        <section className="panel form-panel">
+        </MotionPanel>
+          </MotionView>
+        ) : showSignIn ? (
+          <MotionView viewKey="signin">
+        <MotionPanel className="form-panel">
           <div className="panel-head">
             <div>
               <p className="eyebrow">Sign in</p>
@@ -1866,9 +2029,11 @@ const App = () => {
               Create account
             </button>
           </div>
-        </section>
-      ) : showSignUp ? (
-        <section className="panel form-panel">
+        </MotionPanel>
+          </MotionView>
+        ) : showSignUp ? (
+          <MotionView viewKey="signup">
+        <MotionPanel className="form-panel">
           <div className="panel-head">
             <div>
               <p className="eyebrow">Create account</p>
@@ -1932,9 +2097,11 @@ const App = () => {
               Sign in
             </button>
           </div>
-        </section>
-      ) : showAchievements ? (
-        <section className="panel achievement-page">
+        </MotionPanel>
+          </MotionView>
+        ) : showAchievements ? (
+          <MotionView viewKey="achievements">
+        <MotionPanel className="achievement-page">
           <div className="panel-head">
             <div>
               <p className="eyebrow">Achievements</p>
@@ -1999,10 +2166,12 @@ const App = () => {
               </div>
             </>
           )}
-        </section>
-      ) : showSettings ? (
+        </MotionPanel>
+          </MotionView>
+        ) : showSettings ? (
+          <MotionView viewKey="settings">
         <>
-          <section className="panel settings-panel">
+          <MotionPanel className="settings-panel">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">Identity</p>
@@ -2032,9 +2201,9 @@ const App = () => {
                 Update username
               </button>
             </form>
-          </section>
+          </MotionPanel>
 
-          <section className="panel settings-panel">
+          <MotionPanel className="settings-panel">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">Shield</p>
@@ -2091,9 +2260,9 @@ const App = () => {
                 </form>
               </>
             )}
-          </section>
+          </MotionPanel>
 
-          <section className="panel settings-panel">
+          <MotionPanel className="settings-panel">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">Intel</p>
@@ -2144,9 +2313,9 @@ const App = () => {
                 </label>
               ))}
             </div>
-          </section>
+          </MotionPanel>
 
-          <section className="panel settings-panel">
+          <MotionPanel className="settings-panel">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">Rivals</p>
@@ -2175,9 +2344,9 @@ const App = () => {
             ) : (
               <p className="muted">No rivals yet. Recruit them below.</p>
             )}
-          </section>
+          </MotionPanel>
 
-          <section className="panel settings-panel">
+          <MotionPanel className="settings-panel">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">Squads</p>
@@ -2277,9 +2446,9 @@ const App = () => {
                 Create squads to add multiple rivals at once.
               </p>
             )}
-          </section>
+          </MotionPanel>
 
-          <section className="panel settings-panel">
+          <MotionPanel className="settings-panel">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">History</p>
@@ -2323,9 +2492,9 @@ const App = () => {
                 {loading ? "Loading history..." : "No history available yet."}
               </p>
             )}
-          </section>
+          </MotionPanel>
 
-          <section className="panel settings-panel">
+          <MotionPanel className="settings-panel">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">Systems</p>
@@ -2405,7 +2574,7 @@ const App = () => {
                 Menu bar time is available in the macOS app.
               </p>
             )}
-          </section>
+          </MotionPanel>
 
           <AddFriendCard
             friendInput={friendInput}
@@ -2420,9 +2589,11 @@ const App = () => {
             errorMessage={addFriendError}
           />
         </>
-      ) : (
+          </MotionView>
+        ) : (
+          <MotionView viewKey="league">
         <>
-          <section className="panel league-panel">
+          <MotionPanel className="league-panel">
             <div className="league-header">
               <div className="league-title">
                 <h2>
@@ -2558,27 +2729,35 @@ const App = () => {
                   : "No stats yet."}
               </p>
             )}
-          </section>
-          {showHoverModal && (
-            <div
-              className="achievement-hover-backdrop"
-              aria-hidden="true"
-              onMouseDown={(event) => {
-                event.preventDefault();
-                setHoveredUsername(null);
-              }}
-            />
-          )}
-          {showHoverModal && hoveredUsername && hoveredAchievementsState && (
-            <UserAchievementsModal
-              modalRef={achievementsModalRef}
-              username={hoveredAchievementsState.data?.username ?? hoveredUsername}
-              state={hoveredAchievementsState}
-              onRetry={() => {
-                void fetchUserAchievements(hoveredUsername, true);
-              }}
-            />
-          )}
+          </MotionPanel>
+          <AnimatePresence>
+            {showHoverModal && (
+              <motion.div
+                className="achievement-hover-backdrop"
+                aria-hidden="true"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  setHoveredUsername(null);
+                }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{
+                  duration: getMotionDuration(reduceMotion, 0.16),
+                }}
+              />
+            )}
+            {showHoverModal && hoveredUsername && hoveredAchievementsState && (
+              <UserAchievementsModal
+                modalRef={achievementsModalRef}
+                username={hoveredAchievementsState.data?.username ?? hoveredUsername}
+                state={hoveredAchievementsState}
+                onRetry={() => {
+                  void fetchUserAchievements(hoveredUsername, true);
+                }}
+              />
+            )}
+          </AnimatePresence>
           {showDockedAdd && (
             <AddFriendCard
               docked
@@ -2600,7 +2779,9 @@ const App = () => {
             />
           )}
         </>
-      )}
+          </MotionView>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
@@ -2629,9 +2810,6 @@ const rankDisplay = (rank: number | null) => {
 };
 
 type RowEntry = LeaderboardEntry | WeeklyLeaderboardEntry;
-
-const isEntryOnline = (entry: RowEntry): boolean =>
-  entry.status === "ok" && "isOnline" in entry && Boolean(entry.isOnline);
 
 const formatDateKey = (dateKey: string): string => {
   const date = new Date(`${dateKey}T00:00:00Z`);
@@ -2674,14 +2852,23 @@ const AchievementCatalogCard = ({
   achievement: AchievementCatalogItem;
 }) => {
   const rarity = getAchievementRarity(achievement.id);
+  const reduceMotion = useReducedMotion();
 
   return (
-    <div
+    <motion.div
+      layout
       className={`achievement-catalog-card ${
         achievement.unlocked ? "unlocked" : "locked"
       } rarity-${rarity}`}
       data-rarity={rarity}
       aria-disabled={!achievement.unlocked}
+      initial={{ opacity: 0, y: reduceMotion ? 0 : 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{
+        duration: getMotionDuration(reduceMotion, 0.2),
+        ease: motionEase,
+      }}
+      whileHover={reduceMotion ? undefined : { y: -2 }}
     >
       <div className="achievement-catalog-icon">{achievement.icon}</div>
       <div className="achievement-catalog-copy">
@@ -2696,7 +2883,7 @@ const AchievementCatalogCard = ({
           Last unlock: {formatOptionalAchievementDate(achievement.lastAwardedAt)}
         </span>
       </div>
-    </div>
+    </motion.div>
   );
 };
 
@@ -2712,9 +2899,28 @@ const UserAchievementsModal = ({
   onRetry: () => void;
 }) => {
   const achievements = state.data?.achievements ?? [];
+  const reduceMotion = useReducedMotion();
 
   return (
-    <aside ref={modalRef} className="achievement-hover-modal">
+    <motion.aside
+      ref={modalRef}
+      className="achievement-hover-modal"
+      initial={{
+        opacity: 0,
+        y: reduceMotion ? 0 : 8,
+        scale: reduceMotion ? 1 : 0.98,
+      }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{
+        opacity: 0,
+        y: reduceMotion ? 0 : 8,
+        scale: reduceMotion ? 1 : 0.98,
+      }}
+      transition={{
+        duration: getMotionDuration(reduceMotion, 0.2),
+        ease: motionEase,
+      }}
+    >
       <div className="achievement-hover-head">
         <p className="eyebrow">Achievements</p>
         <h3>{username}</h3>
@@ -2735,14 +2941,21 @@ const UserAchievementsModal = ({
         <p className="muted">No achievements unlocked yet.</p>
       ) : (
         <div className="achievement-hover-list">
-          {achievements.map((achievement) => {
+          {achievements.map((achievement, index) => {
             const rarity = getAchievementRarity(achievement.id);
 
             return (
-              <div
+              <motion.div
                 key={achievement.id}
                 className={`achievement-hover-item rarity-${rarity}`}
                 data-rarity={rarity}
+                initial={{ opacity: 0, y: reduceMotion ? 0 : -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{
+                  duration: getMotionDuration(reduceMotion, 0.18),
+                  delay: reduceMotion ? 0 : index * 0.06,
+                  ease: motionEase,
+                }}
               >
                 <div
                   className="achievement-hover-icon"
@@ -2761,12 +2974,12 @@ const UserAchievementsModal = ({
                     </span>
                   </div>
                 </div>
-              </div>
+              </motion.div>
             );
           })}
         </div>
       )}
-    </aside>
+    </motion.aside>
   );
 };
 
@@ -2776,23 +2989,23 @@ const MiniRow = ({ entry, isSelf }: { entry: RowEntry; isSelf: boolean }) => {
   const timeClass =
     entry.status === "ok" ? "mini-time" : "mini-time muted status";
   const displayName = isSelf ? `${entry.username} (you)` : entry.username;
-  const isOnline = isEntryOnline(entry);
+  const reduceMotion = useReducedMotion();
 
   return (
-    <div className={`mini-row ${podiumClass}`}>
+    <motion.div
+      layout
+      className={`mini-row ${podiumClass}`}
+      initial={{ opacity: 0, y: reduceMotion ? 0 : 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{
+        duration: getMotionDuration(reduceMotion, 0.18),
+        ease: motionEase,
+      }}
+    >
       <span className="mini-rank">{rankLabel}</span>
-      <span className="mini-name">
-        <span>{displayName}</span>
-        {isOnline && (
-          <span
-            className="presence-dot mini"
-            title="Online now"
-            aria-hidden="true"
-          />
-        )}
-      </span>
+      <span className="mini-name">{displayName}</span>
       <span className={timeClass}>{timeLabel ?? "—"}</span>
-    </div>
+    </motion.div>
   );
 };
 
@@ -2810,11 +3023,11 @@ const BaseLeaderboardRow = ({
   const { rankLabel, podiumClass } = rankDisplay(entry.rank ?? null);
   const timeLabel = statusLabel(entry.status, entry.totalSeconds);
   const timeClass = entry.status === "ok" ? "time" : "time muted status";
-  const isOnline = isEntryOnline(entry);
   const subtitle = [entry.honorTitle ?? null, secondary]
     .filter((value): value is string => Boolean(value && value.trim().length > 0))
     .join(" • ");
   const handleClick = () => onSelect?.(entry.username);
+  const reduceMotion = useReducedMotion();
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (!onSelect) return;
     if (event.key !== "Enter" && event.key !== " ") return;
@@ -2823,25 +3036,26 @@ const BaseLeaderboardRow = ({
   };
 
   return (
-    <div
+    <motion.div
+      layout
       className={`row-item row-item-trigger ${isSelf ? "self" : ""} ${podiumClass} status-${entry.status}`}
       role={onSelect ? "button" : undefined}
       tabIndex={onSelect ? 0 : undefined}
       onClick={onSelect ? handleClick : undefined}
       onKeyDown={handleKeyDown}
+      initial={{ opacity: 0, y: reduceMotion ? 0 : 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{
+        duration: getMotionDuration(reduceMotion, 0.2),
+        ease: motionEase,
+      }}
+      whileHover={reduceMotion ? undefined : { y: -1 }}
     >
       <div className="row-item-left">
         <div className="avatar">{entry.username.slice(0, 1).toUpperCase()}</div>
         <div className="row-content">
           <div className="row-title">
             <span className="username-trigger">{entry.username}</span>
-            {isOnline && (
-              <span
-                className="presence-dot"
-                title="Online now"
-                aria-hidden="true"
-              />
-            )}
             {isSelf && <span className="badge">YOU</span>}
           </div>
           {subtitle && (
@@ -2857,7 +3071,7 @@ const BaseLeaderboardRow = ({
           <span className="rank-display">{rankLabel}</span>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };
 

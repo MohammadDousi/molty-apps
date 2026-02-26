@@ -88,8 +88,6 @@ const normalizeFriendUsername = (value: string): string => {
   return normalizeUsername(lastSegment.replace(/^@/, ""));
 };
 
-const ONLINE_STATUS_TTL_MS = 10 * 60 * 1000;
-
 export const createServer = ({
   port,
   hostname,
@@ -206,22 +204,6 @@ export const createServer = ({
     const statsByUserId = new Map(
       dailyStats.map((stat) => [stat.userId, stat])
     );
-    const shouldIncludePresence = offsetDays === 0;
-    const onlineUserIds = new Set<number>();
-
-    if (shouldIncludePresence) {
-      const nowEpoch = baseDate.getTime();
-      const codingStatuses = await store.getLatestCodingStatuses({
-        userIds,
-        minFetchedAt: new Date(nowEpoch - ONLINE_STATUS_TTL_MS),
-      });
-
-      codingStatuses.forEach((status) => {
-        if (!status.isCoding) return;
-        if (nowEpoch - status.fetchedAt.getTime() > ONLINE_STATUS_TTL_MS) return;
-        onlineUserIds.add(status.userId);
-      });
-    }
 
     const incomingFriendIds = new Set(
       await store.getIncomingFriendIds(config.id, userIds)
@@ -247,7 +229,6 @@ export const createServer = ({
           totalSeconds: 0,
           status: "private",
           error: null,
-          isOnline: false,
         };
       }
       if (!stat) {
@@ -257,7 +238,6 @@ export const createServer = ({
           totalSeconds: 0,
           status: "error",
           error: "No stats synced yet",
-          isOnline: false,
         };
       }
 
@@ -267,10 +247,6 @@ export const createServer = ({
         totalSeconds: stat.totalSeconds,
         status: stat.status,
         error: stat.error ?? null,
-        isOnline:
-          shouldIncludePresence &&
-          stat.status === "ok" &&
-          onlineUserIds.has(user.id),
       };
     };
 

@@ -52,7 +52,6 @@ export type DailyStat = {
   totalSeconds: number;
   status: DailyStatStatus;
   error?: string | null;
-  isOnline?: boolean;
 };
 
 export type LeaderboardEntry = DailyStat & {

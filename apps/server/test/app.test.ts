@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DailyStatStatus, UserConfig } from "@molty/shared";
 import { createServer } from "../src/app.js";
-import type {
-  AchievementContextKind,
-  ProviderLogRecord,
-  UserRepository
-} from "../src/repository.js";
+import type { AchievementContextKind, UserRepository } from "../src/repository.js";
 import { ACHIEVEMENT_DEFINITIONS } from "../src/achievements.js";
 import { shiftDateKey } from "../src/date-key.js";
 
@@ -44,44 +40,8 @@ const createMemoryRepository = (): UserRepository => {
   let dailyStats: DailyStatRecord[] = [];
   let weeklyStats: WeeklyStatRecord[] = [];
   let achievements: AchievementRecord[] = [];
-  let providerLogs: ProviderLogRecord[] = [];
   let nextId = 1;
   let nextGroupId = 1;
-
-  const readCodingState = (payload: unknown): boolean | null => {
-    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-      return null;
-    }
-
-    const root = payload as {
-      is_coding?: unknown;
-      isCoding?: unknown;
-      data?: unknown;
-    };
-    if (typeof root.is_coding === "boolean") {
-      return root.is_coding;
-    }
-    if (typeof root.isCoding === "boolean") {
-      return root.isCoding;
-    }
-
-    if (!root.data || typeof root.data !== "object" || Array.isArray(root.data)) {
-      return null;
-    }
-
-    const data = root.data as {
-      is_coding?: unknown;
-      isCoding?: unknown;
-    };
-    if (typeof data.is_coding === "boolean") {
-      return data.is_coding;
-    }
-    if (typeof data.isCoding === "boolean") {
-      return data.isCoding;
-    }
-
-    return null;
-  };
 
   const withRelations = (user: UserRecord): UserConfig => {
     const friends = friendships
@@ -423,46 +383,7 @@ const createMemoryRepository = (): UserRepository => {
           contextKey: entry.contextKey,
           awardedAt: entry.awardedAt
         })),
-    getLatestCodingStatuses: async ({ userIds, minFetchedAt }) => {
-      const logs = providerLogs
-        .filter((log) => log.provider === "wakatime")
-        .filter((log) => log.endpoint === "status_bar/today")
-        .filter((log) => log.ok)
-        .filter((log) => typeof log.userId === "number" && userIds.includes(log.userId))
-        .filter((log) =>
-          minFetchedAt
-            ? log.fetchedAt.getTime() >= minFetchedAt.getTime()
-            : true
-        )
-        .sort((a, b) => b.fetchedAt.getTime() - a.fetchedAt.getTime());
-
-      const seenUserIds = new Set<number>();
-      const statuses: Array<{ userId: number; isCoding: boolean; fetchedAt: Date }> = [];
-
-      logs.forEach((log) => {
-        const userId = log.userId;
-        if (typeof userId !== "number" || seenUserIds.has(userId)) {
-          return;
-        }
-
-        const isCoding = readCodingState(log.payload ?? null);
-        if (isCoding === null) {
-          return;
-        }
-
-        seenUserIds.add(userId);
-        statuses.push({
-          userId,
-          isCoding,
-          fetchedAt: log.fetchedAt
-        });
-      });
-
-      return statuses;
-    },
-    createProviderLog: async (input) => {
-      providerLogs = [...providerLogs, input];
-    }
+    createProviderLog: async () => {}
   };
 };
 
@@ -673,145 +594,6 @@ describe("server app", () => {
     );
     const statsPayload = (await statsResponse.json()) as { entries: Array<{ username: string }> };
     expect(statsPayload.entries.map((entry) => entry.username)).toEqual(["amy", "ben", "mo"]);
-  });
-
-  it("marks actively coding users as online in daily leaderboard", async () => {
-    const repository = createMemoryRepository();
-    const { app, store } = createServer({
-      port: 0,
-      repository,
-      enableStatusSync: false
-    });
-
-    const { sessionId } = await getSessionId(
-      await app.handle(
-        new Request("http://localhost/wakawars/v0/config", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            wakawarsUsername: "mo",
-            apiKey: "key-mo"
-          })
-        })
-      )
-    );
-
-    await app.handle(
-      new Request("http://localhost/wakawars/v0/config", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          wakawarsUsername: "amy",
-          apiKey: "key-amy"
-        })
-      })
-    );
-
-    await app.handle(
-      new Request("http://localhost/wakawars/v0/config", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          wakawarsUsername: "ben",
-          apiKey: "key-ben"
-        })
-      })
-    );
-
-    await app.handle(
-      new Request("http://localhost/wakawars/v0/friends", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-wakawars-session": sessionId ?? ""
-        },
-        body: JSON.stringify({ username: "amy" })
-      })
-    );
-
-    await app.handle(
-      new Request("http://localhost/wakawars/v0/friends", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-wakawars-session": sessionId ?? ""
-        },
-        body: JSON.stringify({ username: "ben" })
-      })
-    );
-
-    const dateKey = new Date().toISOString().slice(0, 10);
-    const now = new Date();
-    const stale = new Date(now.getTime() - 11 * 60 * 1000);
-    const mo = await store.getUserByUsername("mo");
-    const amy = await store.getUserByUsername("amy");
-    const ben = await store.getUserByUsername("ben");
-    await Promise.all([
-      store.upsertDailyStat({
-        userId: mo!.id,
-        dateKey,
-        totalSeconds: 900,
-        status: "ok",
-        error: null,
-        fetchedAt: now
-      }),
-      store.upsertDailyStat({
-        userId: amy!.id,
-        dateKey,
-        totalSeconds: 3600,
-        status: "ok",
-        error: null,
-        fetchedAt: now
-      }),
-      store.upsertDailyStat({
-        userId: ben!.id,
-        dateKey,
-        totalSeconds: 1800,
-        status: "ok",
-        error: null,
-        fetchedAt: now
-      }),
-      store.createProviderLog({
-        provider: "wakatime",
-        userId: mo!.id,
-        endpoint: "status_bar/today",
-        ok: true,
-        payload: { data: { is_coding: true } },
-        fetchedAt: now
-      }),
-      store.createProviderLog({
-        provider: "wakatime",
-        userId: amy!.id,
-        endpoint: "status_bar/today",
-        ok: true,
-        payload: { data: { is_coding: true } },
-        fetchedAt: now
-      }),
-      store.createProviderLog({
-        provider: "wakatime",
-        userId: ben!.id,
-        endpoint: "status_bar/today",
-        ok: true,
-        payload: { data: { is_coding: true } },
-        fetchedAt: stale
-      })
-    ]);
-
-    const statsResponse = await app.handle(
-      new Request("http://localhost/wakawars/v0/stats/today", {
-        headers: { "x-wakawars-session": sessionId ?? "" }
-      })
-    );
-    const statsPayload = (await statsResponse.json()) as {
-      entries: Array<{ username: string; isOnline?: boolean }>;
-    };
-    const onlineByUser = new Map(
-      statsPayload.entries.map((entry) => [entry.username, Boolean(entry.isOnline)])
-    );
-
-    expect(onlineByUser.get("mo")).toBe(true);
-    expect(onlineByUser.get("amy")).toBe(true);
-    expect(onlineByUser.get("ben")).toBe(false);
   });
 
   it("returns 7 days of historical daily podiums", async () => {
