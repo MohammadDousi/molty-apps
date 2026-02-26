@@ -7,6 +7,7 @@ import type {
   UserConfig,
   DailyStat,
   LeaderboardResponse,
+  DailyHistoryResponse,
   ShopCatalogResponse,
   SkinId,
   WalletResponse,
@@ -34,6 +35,10 @@ import {
   toAchievementBoard,
   toAchievementDisplay,
 } from "./achievements.js";
+import {
+  HONOR_TITLE_ACHIEVEMENT_IDS,
+  resolveHonorTitlesByUserId,
+} from "./honor-titles.js";
 
 export type ServerOptions = {
   port: number;
@@ -154,6 +159,18 @@ export const createServer = ({
     return shiftDateKey(todayKey, offsetDays);
   };
 
+  const resolveHonorTitles = async (userIds: number[]) => {
+    const grants = await store.listAchievementGrants({
+      userIds,
+      achievementIds: HONOR_TITLE_ACHIEVEMENT_IDS,
+    });
+
+    return resolveHonorTitlesByUserId({
+      userIds,
+      grants,
+    });
+  };
+
   const buildDailyLeaderboard = async (config: UserConfig, offsetDays: number) => {
     const baseDate = new Date();
     const groupPeerIds = new Set(await store.getGroupPeerIds(config.id));
@@ -166,6 +183,7 @@ export const createServer = ({
     const users = userIds
       .map((id) => usersById.get(id))
       .filter((user): user is NonNullable<typeof user> => Boolean(user));
+    const honorTitlesByUserId = await resolveHonorTitles(userIds);
 
     const dateKeyGroups = new Map<string, number[]>();
 
@@ -189,6 +207,7 @@ export const createServer = ({
     const statsByUserId = new Map(
       dailyStats.map((stat) => [stat.userId, stat])
     );
+
     const incomingFriendIds = new Set(
       await store.getIncomingFriendIds(config.id, userIds)
     );
@@ -200,6 +219,7 @@ export const createServer = ({
       const isMutualFriend =
         friendIds.has(user.id) && incomingFriendIds.has(user.id);
       const isGroupConnected = groupPeerIds.has(user.id);
+      const honorTitle = honorTitlesByUserId.get(user.id) ?? null;
       const canView =
         isSelf ||
         user.statsVisibility === "everyone" ||
@@ -208,6 +228,7 @@ export const createServer = ({
       if (!canView) {
         return {
           username: user.wakawarsUsername,
+          honorTitle: null,
           totalSeconds: 0,
           status: "private",
           coinBalance: user.coinBalance ?? 0,
@@ -218,6 +239,7 @@ export const createServer = ({
       if (!stat) {
         return {
           username: user.wakawarsUsername,
+          honorTitle,
           totalSeconds: 0,
           status: "error",
           coinBalance: user.coinBalance ?? 0,
@@ -228,6 +250,7 @@ export const createServer = ({
 
       return {
         username: user.wakawarsUsername,
+        honorTitle,
         totalSeconds: stat.totalSeconds,
         status: stat.status,
         coinBalance: user.coinBalance ?? 0,
@@ -273,6 +296,36 @@ export const createServer = ({
     };
 
     return response;
+  };
+
+  const buildDailyHistory = async (
+    config: UserConfig,
+    days: number
+  ): Promise<DailyHistoryResponse> => {
+    const offsets = Array.from({ length: days }, (_, index) => -(index + 1));
+    const leaderboards = await Promise.all(
+      offsets.map((offset) => buildDailyLeaderboard(config, offset))
+    );
+    const updatedAtEpoch = leaderboards.length
+      ? Math.max(
+          ...leaderboards.map((entry) => {
+            const parsed = Date.parse(entry.updatedAt);
+            return Number.isNaN(parsed) ? 0 : parsed;
+          })
+        )
+      : Date.now();
+
+    return {
+      updatedAt: new Date(updatedAtEpoch || Date.now()).toISOString(),
+      days: leaderboards.map((entry, index) => ({
+        date: entry.date,
+        offsetDays: Math.abs(offsets[index] ?? 0),
+        updatedAt: entry.updatedAt,
+        podium: entry.entries
+          .filter((candidate) => typeof candidate.rank === "number")
+          .slice(0, 3),
+      })),
+    };
   };
 
   const canViewUserStats = async ({
@@ -1098,6 +1151,25 @@ export const createServer = ({
 
           return buildDailyLeaderboard(config, -1);
         })
+        .get("/stats/history", async ({ set, headers }) => {
+          const authCheck = await requireSession(headers, set);
+          if (!authCheck.ok) {
+            return { error: "Unauthorized" };
+          }
+
+          const config = await store.getUserById(authCheck.user.id);
+          if (!config) {
+            set.status = 401;
+            return { error: "Unauthorized" };
+          }
+
+          if (!config.wakawarsUsername || !config.apiKey) {
+            set.status = 400;
+            return { error: "App is not configured" };
+          }
+
+          return buildDailyHistory(config, 7);
+        })
         .post("/stats/refresh", async ({ set, headers }) => {
           const authCheck = await requireSession(headers, set);
           if (!authCheck.ok) {
@@ -1151,6 +1223,7 @@ export const createServer = ({
           const users = userIds
             .map((id) => usersById.get(id))
             .filter((user): user is NonNullable<typeof user> => Boolean(user));
+          const honorTitlesByUserId = await resolveHonorTitles(userIds);
 
           const weeklyStats = weeklyCache.getStats({ userIds, rangeKey });
           const statsByUserId = new Map(
@@ -1167,6 +1240,7 @@ export const createServer = ({
             const isMutualFriend =
               friendIds.has(user.id) && incomingFriendIds.has(user.id);
             const isGroupConnected = groupPeerIds.has(user.id);
+            const honorTitle = honorTitlesByUserId.get(user.id) ?? null;
             const canView =
               isSelf ||
               user.statsVisibility === "everyone" ||
@@ -1175,6 +1249,7 @@ export const createServer = ({
             if (!canView) {
               return {
                 username: user.wakawarsUsername,
+                honorTitle: null,
                 totalSeconds: 0,
                 dailyAverageSeconds: 0,
                 status: "private",
@@ -1186,6 +1261,7 @@ export const createServer = ({
             if (!stat) {
               return {
                 username: user.wakawarsUsername,
+                honorTitle,
                 totalSeconds: 0,
                 dailyAverageSeconds: 0,
                 status: "error",
@@ -1197,6 +1273,7 @@ export const createServer = ({
 
             return {
               username: user.wakawarsUsername,
+              honorTitle,
               totalSeconds: stat.totalSeconds,
               dailyAverageSeconds: stat.dailyAverageSeconds,
               status: stat.status,

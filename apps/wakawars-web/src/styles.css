@@ -95,6 +95,12 @@ body::before {
   z-index: 1;
 }
 
+.view-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .app.has-docked-add {
   padding-bottom: 150px;
 }
@@ -266,7 +272,6 @@ h3 {
   flex-direction: column;
   gap: 12px;
   backdrop-filter: blur(12px);
-  animation: riseIn 0.45s ease;
   position: relative;
   overflow: hidden;
 }
@@ -1914,6 +1919,45 @@ input[type="password"]::placeholder {
   flex-shrink: 0;
 }
 
+.history-days {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-day {
+  border-radius: 12px;
+  border: 2px solid var(--stroke);
+  background: rgba(12, 18, 32, 0.7);
+  padding: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+:root[data-theme="light"] .history-day {
+  background: #ffffff;
+}
+
+.history-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.history-day-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.history-day-date {
+  font-size: 10px;
+  white-space: nowrap;
+}
+
 .visibility-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -2235,12 +2279,24 @@ button.icon-button.small:active:not(:disabled) {
   animation: shimmer 1.6s ease infinite;
 }
 
+.achievement-hover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  pointer-events: auto;
+  background: rgba(10, 18, 34, 0.14);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  cursor: pointer;
+}
+
+:root[data-theme="light"] .achievement-hover-backdrop {
+  background: rgba(255, 255, 255, 0.22);
+}
+
 .achievement-hover-modal {
   position: fixed;
-  top: 78px;
-  right: 14px;
-  width: min(360px, calc(100vw - 28px));
-  max-height: 70vh;
+  inset: 10%;
   overflow: auto;
   z-index: 40;
   border-radius: 16px;
@@ -2297,7 +2353,8 @@ button.icon-button.small:active:not(:disabled) {
 
 .achievement-hover-icon {
   position: relative;
-  overflow: hidden;
+  overflow: visible !important;
+  isolation: isolate;
   width: 68px;
   height: 68px;
   border-radius: 20px;
@@ -2368,7 +2425,7 @@ button.icon-button.small:active:not(:disabled) {
   font-family: var(--font-display);
   line-height: 1;
   pointer-events: none;
-  z-index: 2;
+  z-index: 3;
   box-shadow: 0 6px 16px rgba(7, 12, 20, 0.28);
 }
 
@@ -2565,19 +2622,7 @@ button.icon-button.small:active:not(:disabled) {
   }
 }
 
-@keyframes riseIn {
-  0% {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .panel,
   .loading-shimmer {
     animation: none;
   }

@@ -9,6 +9,7 @@ import type {
 import { createServer } from "../src/app.js";
 import type { AchievementContextKind, UserRepository } from "../src/repository.js";
 import { ACHIEVEMENT_DEFINITIONS } from "../src/achievements.js";
+import { shiftDateKey } from "../src/date-key.js";
 
 type UserRecord = Omit<UserConfig, "friends" | "groups">;
 type DailyStatRecord = {
@@ -575,6 +576,22 @@ const createMemoryRepository = (): UserRepository => {
         }))
         .sort((a, b) => b.lastAwardedAt.getTime() - a.lastAwardedAt.getTime());
     },
+    listAchievementGrants: async ({ userIds, achievementIds, contextKind }) =>
+      achievements
+        .filter((entry) => userIds.includes(entry.userId))
+        .filter((entry) =>
+          achievementIds && achievementIds.length > 0
+            ? achievementIds.includes(entry.achievementId)
+            : true
+        )
+        .filter((entry) => (contextKind ? entry.contextKind === contextKind : true))
+        .map((entry) => ({
+          userId: entry.userId,
+          achievementId: entry.achievementId,
+          contextKind: entry.contextKind,
+          contextKey: entry.contextKey,
+          awardedAt: entry.awardedAt
+        })),
     createProviderLog: async () => {}
   };
 };
@@ -786,6 +803,347 @@ describe("server app", () => {
     );
     const statsPayload = (await statsResponse.json()) as { entries: Array<{ username: string }> };
     expect(statsPayload.entries.map((entry) => entry.username)).toEqual(["amy", "ben", "mo"]);
+  });
+
+  it("returns 7 days of historical daily podiums", async () => {
+    const repository = createMemoryRepository();
+    const { app, store } = createServer({
+      port: 0,
+      repository,
+      enableStatusSync: false
+    });
+
+    const { sessionId } = await getSessionId(
+      await app.handle(
+        new Request("http://localhost/wakawars/v0/config", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            wakawarsUsername: "mo",
+            apiKey: "key"
+          })
+        })
+      )
+    );
+
+    await app.handle(
+      new Request("http://localhost/wakawars/v0/config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          wakawarsUsername: "amy",
+          apiKey: "key"
+        })
+      })
+    );
+
+    await app.handle(
+      new Request("http://localhost/wakawars/v0/config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          wakawarsUsername: "ben",
+          apiKey: "key"
+        })
+      })
+    );
+
+    await app.handle(
+      new Request("http://localhost/wakawars/v0/friends", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-wakawars-session": sessionId ?? ""
+        },
+        body: JSON.stringify({ username: "amy" })
+      })
+    );
+
+    await app.handle(
+      new Request("http://localhost/wakawars/v0/friends", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-wakawars-session": sessionId ?? ""
+        },
+        body: JSON.stringify({ username: "ben" })
+      })
+    );
+
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const yesterdayKey = shiftDateKey(todayKey, -1);
+    const twoDaysAgoKey = shiftDateKey(todayKey, -2);
+    const now = new Date();
+    const mo = await store.getUserByUsername("mo");
+    const amy = await store.getUserByUsername("amy");
+    const ben = await store.getUserByUsername("ben");
+
+    await Promise.all([
+      store.upsertDailyStat({
+        userId: mo!.id,
+        dateKey: yesterdayKey,
+        totalSeconds: 7 * 3600,
+        status: "ok",
+        error: null,
+        fetchedAt: now
+      }),
+      store.upsertDailyStat({
+        userId: amy!.id,
+        dateKey: yesterdayKey,
+        totalSeconds: 8 * 3600,
+        status: "ok",
+        error: null,
+        fetchedAt: now
+      }),
+      store.upsertDailyStat({
+        userId: ben!.id,
+        dateKey: yesterdayKey,
+        totalSeconds: 6 * 3600,
+        status: "ok",
+        error: null,
+        fetchedAt: now
+      }),
+      store.upsertDailyStat({
+        userId: mo!.id,
+        dateKey: twoDaysAgoKey,
+        totalSeconds: 9 * 3600,
+        status: "ok",
+        error: null,
+        fetchedAt: now
+      }),
+      store.upsertDailyStat({
+        userId: amy!.id,
+        dateKey: twoDaysAgoKey,
+        totalSeconds: 5 * 3600,
+        status: "ok",
+        error: null,
+        fetchedAt: now
+      }),
+      store.upsertDailyStat({
+        userId: ben!.id,
+        dateKey: twoDaysAgoKey,
+        totalSeconds: 4 * 3600,
+        status: "ok",
+        error: null,
+        fetchedAt: now
+      })
+    ]);
+
+    const historyResponse = await app.handle(
+      new Request("http://localhost/wakawars/v0/stats/history", {
+        headers: { "x-wakawars-session": sessionId ?? "" }
+      })
+    );
+    const historyPayload = (await historyResponse.json()) as {
+      days: Array<{ offsetDays: number; podium: Array<{ username: string }> }>;
+    };
+
+    expect(historyPayload.days).toHaveLength(7);
+    expect(historyPayload.days[0]?.offsetDays).toBe(1);
+    expect(historyPayload.days[0]?.podium.map((entry) => entry.username)).toEqual([
+      "amy",
+      "mo",
+      "ben"
+    ]);
+    expect(historyPayload.days[1]?.offsetDays).toBe(2);
+    expect(historyPayload.days[1]?.podium.map((entry) => entry.username)).toEqual([
+      "mo",
+      "amy",
+      "ben"
+    ]);
+    expect(historyPayload.days[2]?.offsetDays).toBe(3);
+    expect(historyPayload.days[2]?.podium).toHaveLength(0);
+  });
+
+  it("adds honor title for weekly 40h streaks", async () => {
+    const repository = createMemoryRepository();
+    const { app, store } = createServer({
+      port: 0,
+      repository,
+      enableStatusSync: false
+    });
+
+    const { sessionId } = await getSessionId(
+      await app.handle(
+        new Request("http://localhost/wakawars/v0/config", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            wakawarsUsername: "mo",
+            apiKey: "key"
+          })
+        })
+      )
+    );
+
+    await app.handle(
+      new Request("http://localhost/wakawars/v0/config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          wakawarsUsername: "amy",
+          apiKey: "key"
+        })
+      })
+    );
+
+    await app.handle(
+      new Request("http://localhost/wakawars/v0/friends", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-wakawars-session": sessionId ?? ""
+        },
+        body: JSON.stringify({ username: "amy" })
+      })
+    );
+
+    const dateKey = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const mo = await store.getUserByUsername("mo");
+    const amy = await store.getUserByUsername("amy");
+    await store.upsertDailyStat({
+      userId: mo!.id,
+      dateKey,
+      totalSeconds: 900,
+      status: "ok",
+      error: null,
+      fetchedAt: now
+    });
+    await store.upsertDailyStat({
+      userId: amy!.id,
+      dateKey,
+      totalSeconds: 3600,
+      status: "ok",
+      error: null,
+      fetchedAt: now
+    });
+
+    await Promise.all([
+      store.grantAchievement({
+        userId: amy!.id,
+        achievementId: "workweek-warrior-40h",
+        contextKind: "weekly",
+        contextKey: "this_week:2026-W05",
+        awardedAt: new Date("2026-02-02T12:00:00.000Z")
+      }),
+      store.grantAchievement({
+        userId: amy!.id,
+        achievementId: "workweek-warrior-40h",
+        contextKind: "weekly",
+        contextKey: "this_week:2026-W06",
+        awardedAt: new Date("2026-02-09T12:00:00.000Z")
+      }),
+      store.grantAchievement({
+        userId: amy!.id,
+        achievementId: "workweek-warrior-40h",
+        contextKind: "weekly",
+        contextKey: "this_week:2026-W07",
+        awardedAt: new Date("2026-02-16T12:00:00.000Z")
+      }),
+      store.grantAchievement({
+        userId: amy!.id,
+        achievementId: "workweek-warrior-40h",
+        contextKind: "weekly",
+        contextKey: "this_week:2026-W08",
+        awardedAt: new Date("2026-02-23T12:00:00.000Z")
+      })
+    ]);
+
+    const statsResponse = await app.handle(
+      new Request("http://localhost/wakawars/v0/stats/today", {
+        headers: { "x-wakawars-session": sessionId ?? "" }
+      })
+    );
+    const statsPayload = (await statsResponse.json()) as {
+      entries: Array<{ username: string; honorTitle?: string | null }>;
+    };
+    const amyEntry = statsPayload.entries.find((entry) => entry.username === "amy");
+    expect(amyEntry?.honorTitle).toBe("Sultan of Weeks");
+  });
+
+  it("maps high-tier achievements to creative honor titles", async () => {
+    const repository = createMemoryRepository();
+    const { app, store } = createServer({
+      port: 0,
+      repository,
+      enableStatusSync: false
+    });
+
+    const { sessionId } = await getSessionId(
+      await app.handle(
+        new Request("http://localhost/wakawars/v0/config", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            wakawarsUsername: "mo",
+            apiKey: "key"
+          })
+        })
+      )
+    );
+
+    await app.handle(
+      new Request("http://localhost/wakawars/v0/config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          wakawarsUsername: "amy",
+          apiKey: "key"
+        })
+      })
+    );
+
+    await app.handle(
+      new Request("http://localhost/wakawars/v0/friends", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-wakawars-session": sessionId ?? ""
+        },
+        body: JSON.stringify({ username: "amy" })
+      })
+    );
+
+    const dateKey = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const mo = await store.getUserByUsername("mo");
+    const amy = await store.getUserByUsername("amy");
+    await store.upsertDailyStat({
+      userId: mo!.id,
+      dateKey,
+      totalSeconds: 1200,
+      status: "ok",
+      error: null,
+      fetchedAt: now
+    });
+    await store.upsertDailyStat({
+      userId: amy!.id,
+      dateKey,
+      totalSeconds: 7200,
+      status: "ok",
+      error: null,
+      fetchedAt: now
+    });
+
+    await store.grantAchievement({
+      userId: amy!.id,
+      achievementId: "matrix-120h",
+      contextKind: "weekly",
+      contextKey: "this_week:2026-W09",
+      awardedAt: new Date("2026-03-01T12:00:00.000Z")
+    });
+
+    const statsResponse = await app.handle(
+      new Request("http://localhost/wakawars/v0/stats/today", {
+        headers: { "x-wakawars-session": sessionId ?? "" }
+      })
+    );
+    const statsPayload = (await statsResponse.json()) as {
+      entries: Array<{ username: string; honorTitle?: string | null }>;
+    };
+    const amyEntry = statsPayload.entries.find((entry) => entry.username === "amy");
+    expect(amyEntry?.honorTitle).toBe("Matrix Sovereign");
   });
 
   it("includes group members in leaderboards for all members", async () => {
@@ -1767,9 +2125,71 @@ describe("server app", () => {
     expect(achievementIds).toContain("solo-day-8h");
     expect(achievementIds).toContain("overclocked-core-10h");
     expect(achievementIds).toContain("green-wall-80h");
-    expect(achievementIds).toContain("mono-stack-80h");
-    expect(achievementIds).toContain("language-hydra-80h");
     expect(achievementIds).toContain("marathon-pace-8h");
     expect(achievementIds).not.toContain("legendary-commit-16h");
+  });
+
+  it("treats Friday as weekend for weekend achievements", async () => {
+    const repository = createMemoryRepository();
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input);
+
+      if (url.includes("/status_bar/today")) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              grand_total: {
+                total_seconds: 12 * 60 * 60
+              },
+              range: {
+                date: "2026-02-20",
+                timezone: "UTC"
+              }
+            }
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        );
+      }
+
+      return new Response(JSON.stringify({ error: "Not found" }), {
+        status: 404,
+        headers: { "content-type": "application/json" }
+      });
+    };
+
+    const { app, store, statusSync } = createServer({
+      port: 0,
+      repository,
+      fetcher,
+      enableStatusSync: false,
+      enableWeeklyCache: false
+    });
+
+    await app.handle(
+      new Request("http://localhost/wakawars/v0/config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          wakawarsUsername: "mo",
+          apiKey: "key-mo"
+        })
+      })
+    );
+
+    const mo = await store.getUserByUsername("mo");
+    await statusSync.syncUser({
+      id: mo!.id,
+      apiKey: mo!.apiKey,
+      wakatimeTimezone: mo!.wakatimeTimezone
+    });
+
+    const unlocks = await store.listAchievementUnlocks({ userId: mo!.id });
+    const achievementIds = unlocks.map((achievement) => achievement.achievementId);
+
+    expect(achievementIds).toContain("weekend-warrior-8h");
+    expect(achievementIds).toContain("weekend-overdrive-12h");
   });
 });

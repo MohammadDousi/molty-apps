@@ -52,6 +52,7 @@ export type DailyStatStatus = "ok" | "private" | "not_found" | "error";
 
 export type DailyStat = {
   username: string; // WakaWars username
+  honorTitle?: string | null;
   totalSeconds: number;
   status: DailyStatStatus;
   coinBalance?: number;
@@ -71,8 +72,21 @@ export type LeaderboardResponse = {
   selfEntry?: LeaderboardEntry | null;
 };
 
+export type DailyHistoryDay = {
+  date: string;
+  offsetDays: number;
+  updatedAt: string;
+  podium: LeaderboardEntry[];
+};
+
+export type DailyHistoryResponse = {
+  updatedAt: string;
+  days: DailyHistoryDay[];
+};
+
 export type WeeklyStat = {
   username: string; // WakaWars username
+  honorTitle?: string | null;
   totalSeconds: number;
   dailyAverageSeconds: number;
   status: DailyStatStatus;
