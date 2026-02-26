@@ -10,7 +10,12 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import {
+  AnimatePresence,
+  motion,
+  useReducedMotion,
+  type HTMLMotionProps,
+} from "framer-motion";
 import {
   formatDuration,
   computeLeaderboard,
@@ -159,6 +164,14 @@ const getMotionDuration = (
 ): number =>
   reduceMotion ? 0.01 : value;
 
+const getMotionDelay = (
+  reduceMotion: boolean | null | undefined,
+  index: number,
+  step = 0.04,
+  max = 0.3
+): number =>
+  reduceMotion ? 0 : Math.min(index * step, max);
+
 type MotionPanelProps = {
   className?: string;
   children: ReactNode;
@@ -219,6 +232,34 @@ const MotionView = ({ viewKey, children }: MotionViewProps) => {
   );
 };
 
+type MotionButtonProps = HTMLMotionProps<"button">;
+
+const MotionButton = ({
+  children,
+  disabled,
+  className,
+  ...props
+}: MotionButtonProps) => {
+  const reduceMotion = useReducedMotion();
+  const canAnimate = !reduceMotion && !disabled;
+
+  return (
+    <motion.button
+      className={className}
+      disabled={disabled}
+      whileHover={canAnimate ? { y: -1.2, scale: 1.01 } : undefined}
+      whileTap={canAnimate ? { y: 0, scale: 0.975 } : undefined}
+      transition={{
+        duration: getMotionDuration(reduceMotion, 0.14),
+        ease: motionEase,
+      }}
+      {...props}
+    >
+      {children}
+    </motion.button>
+  );
+};
+
 type AddFriendCardProps = {
   docked?: boolean;
   dismissible?: boolean;
@@ -248,14 +289,14 @@ const AddFriendCard = ({
         <p className="muted">Use their WakaTime username to sync stats.</p>
       </div>
       {dismissible && (
-        <button
+        <MotionButton
           type="button"
           className="icon-button small dismiss-button"
           onClick={onDismiss}
           aria-label="Dismiss"
         >
           x
-        </button>
+        </MotionButton>
       )}
     </div>
     <form className="input-row" onSubmit={onSubmit}>
@@ -266,9 +307,9 @@ const AddFriendCard = ({
         placeholder="rival-username"
         disabled={loading}
       />
-      <button className="primary" type="submit" disabled={loading}>
+      <MotionButton className="primary" type="submit" disabled={loading}>
         Recruit
-      </button>
+      </MotionButton>
     </form>
     <AnimatePresence initial={false}>
       {errorMessage && (
@@ -1637,7 +1678,7 @@ const App = () => {
   const canRefresh = Boolean(canShowControlTabs && activeTab === "league");
   const updateLabel = latestVersion ? `Update v${latestVersion}` : "Update";
   const updateButton = updateAvailable ? (
-    <button
+    <MotionButton
       type="button"
       className="primary update-button"
       onClick={handleUpdate}
@@ -1653,7 +1694,7 @@ const App = () => {
       }
     >
       {updateLabel}
-    </button>
+    </MotionButton>
   ) : null;
 
   if (showMainLoading) {
@@ -1699,9 +1740,9 @@ const App = () => {
               }}
             >
               <span>{error}</span>
-              <button className="ghost tiny" onClick={handleRetry}>
+              <MotionButton className="ghost tiny" onClick={handleRetry}>
                 Retry
-              </button>
+              </MotionButton>
             </motion.div>
           )}
         </AnimatePresence>
@@ -1805,7 +1846,7 @@ const App = () => {
             <div className="header-meta">
               {updateButton}
               {showHomeButton && (
-                <button
+                <MotionButton
                   type="button"
                   className="icon-button ghost-button"
                   onClick={() => setActiveTab("league")}
@@ -1813,10 +1854,10 @@ const App = () => {
                   title="Back to home"
                 >
                   <HomeHeaderIcon />
-                </button>
+                </MotionButton>
               )}
               {!showHomeButton && canRefresh && (
-                <button
+                <MotionButton
                   type="button"
                   className="icon-button ghost-button"
                   onClick={handleRefresh}
@@ -1824,10 +1865,10 @@ const App = () => {
                   aria-label={refreshing ? "Refreshing stats" : "Refresh stats"}
                 >
                   ↻
-                </button>
+                </MotionButton>
               )}
               {canShowControlTabs && (
-                <button
+                <MotionButton
                   type="button"
                   className={`icon-button ghost-button ${
                     activeTab === "achievements" ? "active" : ""
@@ -1837,10 +1878,10 @@ const App = () => {
                   title="Open achievements"
                 >
                   <AchievementHeaderIcon />
-                </button>
+                </MotionButton>
               )}
               {canShowControlTabs && (
-                <button
+                <MotionButton
                   type="button"
                   className={`icon-button ghost-button ${
                     activeTab === "settings" ? "active" : ""
@@ -1853,7 +1894,7 @@ const App = () => {
                   aria-label="Settings"
                 >
                   ⚙︎
-                </button>
+                </MotionButton>
               )}
             </div>
           </motion.header>
@@ -1874,9 +1915,9 @@ const App = () => {
             }}
           >
             <span>{error}</span>
-            <button className="ghost tiny" onClick={handleRetry}>
+            <MotionButton className="ghost tiny" onClick={handleRetry}>
               Retry
-            </button>
+            </MotionButton>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1902,20 +1943,20 @@ const App = () => {
             </p>
           </div>
           <div className="hero-actions">
-            <button
+            <MotionButton
               className="primary"
               type="button"
               onClick={() => setAuthView("signup")}
             >
               Enter arena
-            </button>
-            <button
+            </MotionButton>
+            <MotionButton
               className="ghost"
               type="button"
               onClick={() => setAuthView("signin")}
             >
               Return
-            </button>
+            </MotionButton>
           </div>
           <div className="feature-grid">
             <motion.div
@@ -1974,13 +2015,13 @@ const App = () => {
               <p className="muted">Use your WakaWars username and password.</p>
             </div>
             {!showLogin && (
-              <button
+              <MotionButton
                 className="ghost tiny"
                 type="button"
                 onClick={() => setAuthView("welcome")}
               >
                 Back
-              </button>
+              </MotionButton>
             )}
           </div>
           <form className="stack" onSubmit={handleLogin}>
@@ -2015,19 +2056,19 @@ const App = () => {
                 disabled={loading}
               />
             </label>
-            <button className="primary" type="submit" disabled={loading}>
+            <MotionButton className="primary" type="submit" disabled={loading}>
               Sign in
-            </button>
+            </MotionButton>
           </form>
           <div className="inline-action">
             <span className="muted">New here?</span>
-            <button
+            <MotionButton
               className="ghost tiny"
               type="button"
               onClick={() => setAuthView("signup")}
             >
               Create account
-            </button>
+            </MotionButton>
           </div>
         </MotionPanel>
           </MotionView>
@@ -2042,13 +2083,13 @@ const App = () => {
                 Set a WakaWars username and connect your token.
               </p>
             </div>
-            <button
+            <MotionButton
               className="ghost tiny"
               type="button"
               onClick={() => setAuthView(showLogin ? "signin" : "welcome")}
             >
               Back
-            </button>
+            </MotionButton>
           </div>
           <form className="stack" onSubmit={handleOnboardingSubmit}>
             <label>
@@ -2083,19 +2124,19 @@ const App = () => {
                 disabled={loading}
               />
             </label>
-            <button className="primary" type="submit" disabled={loading}>
+            <MotionButton className="primary" type="submit" disabled={loading}>
               Create account
-            </button>
+            </MotionButton>
           </form>
           <div className="inline-action">
             <span className="muted">Already in the league?</span>
-            <button
+            <MotionButton
               className="ghost tiny"
               type="button"
               onClick={() => setAuthView("signin")}
             >
               Sign in
-            </button>
+            </MotionButton>
           </div>
         </MotionPanel>
           </MotionView>
@@ -2112,7 +2153,7 @@ const App = () => {
                   : "Loading your progress"}
               </p>
             </div>
-            <button
+            <MotionButton
               type="button"
               className="ghost tiny"
               onClick={() => {
@@ -2121,46 +2162,63 @@ const App = () => {
               disabled={achievementCatalogLoading}
             >
               Refresh
-            </button>
+            </MotionButton>
           </div>
           {achievementCatalogLoading && !achievementCatalog ? (
             <div className="loading-shimmer" aria-hidden="true" />
           ) : achievementCatalogError && !achievementCatalog ? (
             <div className="error">
               <span>{achievementCatalogError}</span>
-              <button
+              <MotionButton
                 className="ghost tiny"
                 onClick={() => {
                   void loadAchievementCatalog(true);
                 }}
               >
                 Retry
-              </button>
+              </MotionButton>
             </div>
           ) : (
             <>
               <div className="achievement-summary">
-                <div className="summary-chip">
-                  <span className="summary-chip-label">User</span>
-                  <span>{achievementCatalog?.username ?? "-"}</span>
-                </div>
-                <div className="summary-chip">
-                  <span className="summary-chip-label">Total unlocks</span>
-                  <span>{achievementCatalog?.totalUnlocks ?? 0}</span>
-                </div>
-                <div className="summary-chip">
-                  <span className="summary-chip-label">Badges unlocked</span>
-                  <span>
-                    {achievementCatalog?.unlockedCount ?? 0}/
-                    {achievementCatalog?.totalDefined ?? 0}
-                  </span>
-                </div>
+                {[
+                  {
+                    label: "User",
+                    value: achievementCatalog?.username ?? "-",
+                  },
+                  {
+                    label: "Total unlocks",
+                    value: String(achievementCatalog?.totalUnlocks ?? 0),
+                  },
+                  {
+                    label: "Badges unlocked",
+                    value: `${achievementCatalog?.unlockedCount ?? 0}/${
+                      achievementCatalog?.totalDefined ?? 0
+                    }`,
+                  },
+                ].map((chip, index) => (
+                  <motion.div
+                    key={chip.label}
+                    className="summary-chip"
+                    initial={{ opacity: 0, y: reduceMotion ? 0 : 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{
+                      duration: getMotionDuration(reduceMotion, 0.2),
+                      delay: getMotionDelay(reduceMotion, index, 0.05, 0.16),
+                      ease: motionEase,
+                    }}
+                  >
+                    <span className="summary-chip-label">{chip.label}</span>
+                    <span>{chip.value}</span>
+                  </motion.div>
+                ))}
               </div>
               <div className="achievement-catalog-grid">
-                {achievementCatalogEntries.map((achievement) => (
+                {achievementCatalogEntries.map((achievement, index) => (
                   <AchievementCatalogCard
                     key={achievement.id}
                     achievement={achievement}
+                    sequenceIndex={index}
                   />
                 ))}
               </div>
@@ -2193,13 +2251,13 @@ const App = () => {
                   disabled={loading}
                 />
               </label>
-              <button
+              <MotionButton
                 className="primary"
                 type="submit"
                 disabled={loading || !canUpdateUsername}
               >
                 Update username
-              </button>
+              </MotionButton>
             </form>
           </MotionPanel>
 
@@ -2212,10 +2270,19 @@ const App = () => {
               </div>
             </div>
             {session?.passwordSet ? (
-              <div className="settings-row">
+              <motion.div
+                layout
+                className="settings-row"
+                initial={{ opacity: 0, y: reduceMotion ? 0 : 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{
+                  duration: getMotionDuration(reduceMotion, 0.18),
+                  ease: motionEase,
+                }}
+              >
                 <span className="muted">Password</span>
                 <span>Set</span>
-              </div>
+              </motion.div>
             ) : (
               <>
                 <p className="muted">
@@ -2254,9 +2321,9 @@ const App = () => {
                       disabled={loading}
                     />
                   </label>
-                  <button className="primary" type="submit" disabled={loading}>
+                  <MotionButton className="primary" type="submit" disabled={loading}>
                     {passwordActionLabel}
-                  </button>
+                  </MotionButton>
                 </form>
               </>
             )}
@@ -2287,12 +2354,21 @@ const App = () => {
                   title: "No one",
                   description: "Hide stats from everyone else.",
                 },
-              ].map((option) => (
-                <label
+              ].map((option, index) => (
+                <motion.label
+                  layout
                   key={option.value}
                   className={`visibility-option ${
                     config?.statsVisibility === option.value ? "active" : ""
                   }`}
+                  initial={{ opacity: 0, y: reduceMotion ? 0 : 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  whileHover={reduceMotion ? undefined : { y: -1.5 }}
+                  transition={{
+                    duration: getMotionDuration(reduceMotion, 0.2),
+                    delay: getMotionDelay(reduceMotion, index, 0.04, 0.14),
+                    ease: motionEase,
+                  }}
                 >
                   <input
                     type="radio"
@@ -2310,7 +2386,7 @@ const App = () => {
                     <span className="visibility-title">{option.title}</span>
                     <span className="muted">{option.description}</span>
                   </div>
-                </label>
+                </motion.label>
               ))}
             </div>
           </MotionPanel>
@@ -2327,18 +2403,29 @@ const App = () => {
             </div>
             {config?.friends.length ? (
               <div className="settings-list">
-                {config.friends.map((friend) => (
-                  <div className="settings-row" key={friend.username}>
+                {config.friends.map((friend, index) => (
+                  <motion.div
+                    layout
+                    className="settings-row"
+                    key={friend.username}
+                    initial={{ opacity: 0, y: reduceMotion ? 0 : 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{
+                      duration: getMotionDuration(reduceMotion, 0.18),
+                      delay: getMotionDelay(reduceMotion, index, 0.03, 0.18),
+                      ease: motionEase,
+                    }}
+                  >
                     <span>{friend.username}</span>
-                    <button
+                    <MotionButton
                       className="ghost danger tiny"
                       type="button"
                       onClick={() => handleRemoveFriend(friend.username)}
                       disabled={loading}
                     >
                       Remove
-                    </button>
-                  </div>
+                    </MotionButton>
+                  </motion.div>
                 ))}
               </div>
             ) : (
@@ -2364,14 +2451,25 @@ const App = () => {
                 onChange={(event) => setGroupNameInput(event.target.value)}
                 disabled={loading}
               />
-              <button className="primary" type="submit" disabled={loading}>
+              <MotionButton className="primary" type="submit" disabled={loading}>
                 Create
-              </button>
+              </MotionButton>
             </form>
             {config?.groups.length ? (
               <div className="group-list">
-                {config.groups.map((group) => (
-                  <div className="group-block" key={group.id}>
+                {config.groups.map((group, groupIndex) => (
+                  <motion.div
+                    layout
+                    className="group-block"
+                    key={group.id}
+                    initial={{ opacity: 0, y: reduceMotion ? 0 : 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{
+                      duration: getMotionDuration(reduceMotion, 0.2),
+                      delay: getMotionDelay(reduceMotion, groupIndex, 0.04, 0.2),
+                      ease: motionEase,
+                    }}
+                  >
                     <div className="group-header">
                       <div className="group-title">
                         <h3>{group.name}</h3>
@@ -2379,21 +2477,37 @@ const App = () => {
                           {group.members.length} members
                         </span>
                       </div>
-                      <button
+                      <MotionButton
                         className="ghost danger tiny"
                         type="button"
                         onClick={() => handleDeleteGroup(group.id)}
                         disabled={loading}
                       >
                         Delete
-                      </button>
+                      </MotionButton>
                     </div>
                     {group.members.length ? (
                       <div className="settings-list">
-                        {group.members.map((member) => (
-                          <div className="settings-row" key={member.id}>
+                        {group.members.map((member, memberIndex) => (
+                          <motion.div
+                            layout
+                            className="settings-row"
+                            key={member.id}
+                            initial={{ opacity: 0, y: reduceMotion ? 0 : 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{
+                              duration: getMotionDuration(reduceMotion, 0.16),
+                              delay: getMotionDelay(
+                                reduceMotion,
+                                memberIndex,
+                                0.025,
+                                0.12
+                              ),
+                              ease: motionEase,
+                            }}
+                          >
                             <span>{member.username}</span>
-                            <button
+                            <MotionButton
                               className="ghost danger tiny"
                               type="button"
                               onClick={() =>
@@ -2405,8 +2519,8 @@ const App = () => {
                               disabled={loading}
                             >
                               Remove
-                            </button>
-                          </div>
+                            </MotionButton>
+                          </motion.div>
                         ))}
                       </div>
                     ) : (
@@ -2430,15 +2544,15 @@ const App = () => {
                         }
                         disabled={loading}
                       />
-                      <button
+                      <MotionButton
                         className="ghost"
                         type="submit"
                         disabled={loading}
                       >
                         Add
-                      </button>
+                      </MotionButton>
                     </form>
-                  </div>
+                  </motion.div>
                 ))}
               </div>
             ) : (
@@ -2458,10 +2572,18 @@ const App = () => {
             </div>
             {dailyHistory?.days?.length ? (
               <div className="history-days">
-                {historyDays.map((day) => (
-                  <div
+                {historyDays.map((day, dayIndex) => (
+                  <motion.div
+                    layout
                     className="history-day"
                     key={`${day.offsetDays}-${day.date}`}
+                    initial={{ opacity: 0, y: reduceMotion ? 0 : 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{
+                      duration: getMotionDuration(reduceMotion, 0.2),
+                      delay: getMotionDelay(reduceMotion, dayIndex, 0.035, 0.2),
+                      ease: motionEase,
+                    }}
                   >
                     <div className="history-day-head">
                       <span className="history-day-title">
@@ -2473,18 +2595,19 @@ const App = () => {
                     </div>
                     {day.podium.length ? (
                       <div className="mini-list">
-                        {day.podium.map((entry) => (
+                        {day.podium.map((entry, podiumIndex) => (
                           <MiniRow
                             key={`history-${day.date}-${entry.username}`}
                             entry={entry}
                             isSelf={entry.username === config?.wakawarsUsername}
+                            sequenceIndex={podiumIndex}
                           />
                         ))}
                       </div>
                     ) : (
                       <p className="muted">No ranked entries.</p>
                     )}
-                  </div>
+                  </motion.div>
                 ))}
               </div>
             ) : (
@@ -2503,60 +2626,64 @@ const App = () => {
               </div>
             </div>
             <div className="settings-list">
-              <div className="settings-row">
-                <span className="muted">Launch at login</span>
-                <label className="toggle">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(launchAtLogin)}
-                    onChange={(event) =>
-                      handleLaunchToggle(event.target.checked)
-                    }
-                    disabled={launchAtLogin === null}
-                  />
-                  <span className="toggle-ui" />
-                </label>
-              </div>
-              <div className="settings-row">
-                <span className="muted">Menu bar time</span>
-                <label className="toggle">
-                  <input
-                    type="checkbox"
-                    checked={menuBarTimeEnabled}
-                    onChange={(event) =>
-                      setMenuBarTimeEnabled(event.target.checked)
-                    }
-                    disabled={!menuBarTimeSupported}
-                  />
-                  <span className="toggle-ui" />
-                </label>
-              </div>
-              <div className="settings-row">
-                <span className="muted">Menu bar rank</span>
-                <label className="toggle">
-                  <input
-                    type="checkbox"
-                    checked={menuBarRankEnabled}
-                    onChange={(event) =>
-                      setMenuBarRankEnabled(event.target.checked)
-                    }
-                  />
-                  <span className="toggle-ui" />
-                </label>
-              </div>
-              <div className="settings-row">
-                <span className="muted">Light theme</span>
-                <label className="toggle">
-                  <input
-                    type="checkbox"
-                    checked={theme === "light"}
-                    onChange={(event) =>
-                      setTheme(event.target.checked ? "light" : "dark")
-                    }
-                  />
-                  <span className="toggle-ui" />
-                </label>
-              </div>
+              {[
+                {
+                  label: "Launch at login",
+                  checked: Boolean(launchAtLogin),
+                  onChange: (checked: boolean) => {
+                    void handleLaunchToggle(checked);
+                  },
+                  disabled: launchAtLogin === null,
+                },
+                {
+                  label: "Menu bar time",
+                  checked: menuBarTimeEnabled,
+                  onChange: (checked: boolean) => {
+                    setMenuBarTimeEnabled(checked);
+                  },
+                  disabled: !menuBarTimeSupported,
+                },
+                {
+                  label: "Menu bar rank",
+                  checked: menuBarRankEnabled,
+                  onChange: (checked: boolean) => {
+                    setMenuBarRankEnabled(checked);
+                  },
+                  disabled: false,
+                },
+                {
+                  label: "Light theme",
+                  checked: theme === "light",
+                  onChange: (checked: boolean) => {
+                    setTheme(checked ? "light" : "dark");
+                  },
+                  disabled: false,
+                },
+              ].map((item, index) => (
+                <motion.div
+                  layout
+                  className="settings-row"
+                  key={item.label}
+                  initial={{ opacity: 0, y: reduceMotion ? 0 : 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{
+                    duration: getMotionDuration(reduceMotion, 0.18),
+                    delay: getMotionDelay(reduceMotion, index, 0.03, 0.14),
+                    ease: motionEase,
+                  }}
+                >
+                  <span className="muted">{item.label}</span>
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={item.checked}
+                      onChange={(event) => item.onChange(event.target.checked)}
+                      disabled={item.disabled}
+                    />
+                    <span className="toggle-ui" />
+                  </label>
+                </motion.div>
+              ))}
             </div>
             {launchAtLoginStatus === "requires-approval" && (
               <p className="muted">
@@ -2606,7 +2733,7 @@ const App = () => {
               </div>
               <div className="league-actions">
                 <div className="tab-group">
-                  <button
+                  <MotionButton
                     type="button"
                     className={`tab-button ${
                       activeLeagueTab === "today" ? "active" : ""
@@ -2614,8 +2741,8 @@ const App = () => {
                     onClick={() => setActiveLeagueTab("today")}
                   >
                     Today
-                  </button>
-                  <button
+                  </MotionButton>
+                  <MotionButton
                     type="button"
                     className={`tab-button ${
                       activeLeagueTab === "weekly" ? "active" : ""
@@ -2623,10 +2750,10 @@ const App = () => {
                     onClick={() => setActiveLeagueTab("weekly")}
                   >
                     Week
-                  </button>
+                  </MotionButton>
                 </div>
                 {config && (
-                  <button
+                  <MotionButton
                     type="button"
                     className={`ghost competition-toggle ${
                       isCompeting ? "danger" : ""
@@ -2634,7 +2761,7 @@ const App = () => {
                     onClick={handleCompetitionToggle}
                   >
                     {competitionButtonLabel}
-                  </button>
+                  </MotionButton>
                 )}
               </div>
             </div>
@@ -2653,71 +2780,88 @@ const App = () => {
                       <p className="muted">No rivals yet.</p>
                     ) : (
                       <div className="list">
-                        {displayPinnedEntry &&
-                          (activeLeagueTab === "weekly" ? (
-                            <WeeklyLeaderboardRow
-                              key={`self-${displayPinnedEntry.username}`}
-                              entry={
-                                displayPinnedEntry as WeeklyLeaderboardEntry
-                              }
-                              isSelf
-                              onSelect={handleRowSelect}
-                            />
-                          ) : (
-                            <LeaderboardRow
-                              key={`self-${displayPinnedEntry.username}`}
-                              entry={displayPinnedEntry as LeaderboardEntry}
-                              isSelf
-                              onSelect={handleRowSelect}
-                            />
-                          ))}
-                        {activeLeagueTab === "weekly"
-                          ? listEntries.map((entry) => (
+                        <AnimatePresence mode="popLayout" initial={false}>
+                          {displayPinnedEntry &&
+                            (activeLeagueTab === "weekly" ? (
                               <WeeklyLeaderboardRow
-                                key={entry.username}
-                                entry={entry as WeeklyLeaderboardEntry}
-                                isSelf={
-                                  entry.username === config?.wakawarsUsername
+                                key={`self-${displayPinnedEntry.username}`}
+                                entry={
+                                  displayPinnedEntry as WeeklyLeaderboardEntry
                                 }
+                                isSelf
+                                sequenceIndex={0}
                                 onSelect={handleRowSelect}
                               />
-                            ))
-                          : listEntries.map((entry) => (
+                            ) : (
                               <LeaderboardRow
-                                key={entry.username}
-                                entry={entry as LeaderboardEntry}
-                                isSelf={
-                                  entry.username === config?.wakawarsUsername
-                                }
+                                key={`self-${displayPinnedEntry.username}`}
+                                entry={displayPinnedEntry as LeaderboardEntry}
+                                isSelf
+                                sequenceIndex={0}
                                 onSelect={handleRowSelect}
                               />
                             ))}
+                          {activeLeagueTab === "weekly"
+                            ? listEntries.map((entry, index) => (
+                                <WeeklyLeaderboardRow
+                                  key={entry.username}
+                                  entry={entry as WeeklyLeaderboardEntry}
+                                  isSelf={
+                                    entry.username === config?.wakawarsUsername
+                                  }
+                                  sequenceIndex={displayPinnedEntry ? index + 1 : index}
+                                  onSelect={handleRowSelect}
+                                />
+                              ))
+                            : listEntries.map((entry, index) => (
+                                <LeaderboardRow
+                                  key={entry.username}
+                                  entry={entry as LeaderboardEntry}
+                                  isSelf={
+                                    entry.username === config?.wakawarsUsername
+                                  }
+                                  sequenceIndex={displayPinnedEntry ? index + 1 : index}
+                                  onSelect={handleRowSelect}
+                                />
+                              ))}
+                        </AnimatePresence>
                       </div>
                     )}
                   </div>
                   <div className="league-grid">
                     <div className="league-side">
-                      <div className="subcard podium-card">
+                      <motion.div
+                        layout
+                        className="subcard podium-card"
+                        initial={{ opacity: 0, y: reduceMotion ? 0 : 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{
+                          duration: getMotionDuration(reduceMotion, 0.2),
+                          delay: getMotionDelay(reduceMotion, 1, 0.06, 0.12),
+                          ease: motionEase,
+                        }}
+                      >
                         <div className="subcard-header">
                           <h3>Yesterday's podium</h3>
                           <span className="muted">Top 3</span>
                         </div>
                         {yesterdayPodium.length ? (
                           <div className="mini-list">
-                            {yesterdayPodium.map((entry) => (
+                            {yesterdayPodium.map((entry, index) => (
                               <MiniRow
                                 key={`podium-${entry.username}`}
                                 entry={entry}
                                 isSelf={
                                   entry.username === config?.wakawarsUsername
                                 }
+                                sequenceIndex={index}
                               />
                             ))}
                           </div>
                         ) : (
                           <p className="muted">No ranked entries yet.</p>
                         )}
-                      </div>
+                      </motion.div>
                     </div>
                   </div>
                 </div>
@@ -2848,8 +2992,10 @@ const formatOptionalAchievementDate = (value: string | null): string => {
 
 const AchievementCatalogCard = ({
   achievement,
+  sequenceIndex = 0,
 }: {
   achievement: AchievementCatalogItem;
+  sequenceIndex?: number;
 }) => {
   const rarity = getAchievementRarity(achievement.id);
   const reduceMotion = useReducedMotion();
@@ -2866,6 +3012,7 @@ const AchievementCatalogCard = ({
       animate={{ opacity: 1, y: 0 }}
       transition={{
         duration: getMotionDuration(reduceMotion, 0.2),
+        delay: getMotionDelay(reduceMotion, sequenceIndex, 0.02, 0.18),
         ease: motionEase,
       }}
       whileHover={reduceMotion ? undefined : { y: -2 }}
@@ -2933,9 +3080,9 @@ const UserAchievementsModal = ({
       ) : state.error && !state.data ? (
         <div className="achievement-hover-error">
           <p className="muted">{state.error}</p>
-          <button type="button" className="ghost tiny" onClick={onRetry}>
+          <MotionButton type="button" className="ghost tiny" onClick={onRetry}>
             Retry
-          </button>
+          </MotionButton>
         </div>
       ) : achievements.length === 0 ? (
         <p className="muted">No achievements unlocked yet.</p>
@@ -2983,7 +3130,15 @@ const UserAchievementsModal = ({
   );
 };
 
-const MiniRow = ({ entry, isSelf }: { entry: RowEntry; isSelf: boolean }) => {
+const MiniRow = ({
+  entry,
+  isSelf,
+  sequenceIndex = 0,
+}: {
+  entry: RowEntry;
+  isSelf: boolean;
+  sequenceIndex?: number;
+}) => {
   const { rankLabel, podiumClass } = rankDisplay(entry.rank ?? null);
   const timeLabel = statusLabel(entry.status, entry.totalSeconds);
   const timeClass =
@@ -2999,6 +3154,7 @@ const MiniRow = ({ entry, isSelf }: { entry: RowEntry; isSelf: boolean }) => {
       animate={{ opacity: 1, y: 0 }}
       transition={{
         duration: getMotionDuration(reduceMotion, 0.18),
+        delay: getMotionDelay(reduceMotion, sequenceIndex, 0.025, 0.1),
         ease: motionEase,
       }}
     >
@@ -3013,11 +3169,13 @@ const BaseLeaderboardRow = ({
   entry,
   isSelf,
   secondary,
+  sequenceIndex = 0,
   onSelect,
 }: {
   entry: RowEntry;
   isSelf: boolean;
   secondary?: string | null;
+  sequenceIndex?: number;
   onSelect?: (username: string) => void;
 }) => {
   const { rankLabel, podiumClass } = rankDisplay(entry.rank ?? null);
@@ -3047,6 +3205,7 @@ const BaseLeaderboardRow = ({
       animate={{ opacity: 1, y: 0 }}
       transition={{
         duration: getMotionDuration(reduceMotion, 0.2),
+        delay: getMotionDelay(reduceMotion, sequenceIndex, 0.02, 0.22),
         ease: motionEase,
       }}
       whileHover={reduceMotion ? undefined : { y: -1 }}
@@ -3078,16 +3237,19 @@ const BaseLeaderboardRow = ({
 const LeaderboardRow = ({
   entry,
   isSelf,
+  sequenceIndex,
   onSelect,
 }: {
   entry: LeaderboardEntry;
   isSelf: boolean;
+  sequenceIndex?: number;
   onSelect?: (username: string) => void;
 }) => {
   return (
     <BaseLeaderboardRow
       entry={entry}
       isSelf={isSelf}
+      sequenceIndex={sequenceIndex}
       onSelect={onSelect}
     />
   );
@@ -3096,10 +3258,12 @@ const LeaderboardRow = ({
 const WeeklyLeaderboardRow = ({
   entry,
   isSelf,
+  sequenceIndex,
   onSelect,
 }: {
   entry: WeeklyLeaderboardEntry;
   isSelf: boolean;
+  sequenceIndex?: number;
   onSelect?: (username: string) => void;
 }) => {
   const averageLabel =
@@ -3110,6 +3274,7 @@ const WeeklyLeaderboardRow = ({
       entry={entry}
       isSelf={isSelf}
       secondary={averageLabel ? `Avg ${averageLabel}/day` : null}
+      sequenceIndex={sequenceIndex}
       onSelect={onSelect}
     />
   );
