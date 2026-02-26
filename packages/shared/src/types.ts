@@ -10,6 +10,8 @@ export type FriendPublic = {
 
 export type StatsVisibility = "everyone" | "friends" | "no_one";
 export type CompetitionStatus = "active" | "left";
+export type SkinId = string;
+export type PurchasableSkinId = string;
 
 export type GroupMember = {
   id: number;
@@ -31,6 +33,8 @@ export type UserConfig = {
   groups: Group[];
   statsVisibility: StatsVisibility;
   isCompeting: boolean;
+  coinBalance: number;
+  equippedSkinId: SkinId | null;
   passwordHash?: string | null;
 };
 
@@ -51,6 +55,8 @@ export type DailyStat = {
   honorTitle?: string | null;
   totalSeconds: number;
   status: DailyStatStatus;
+  coinBalance?: number;
+  equippedSkinId?: SkinId | null;
   error?: string | null;
 };
 
@@ -84,6 +90,8 @@ export type WeeklyStat = {
   totalSeconds: number;
   dailyAverageSeconds: number;
   status: DailyStatStatus;
+  coinBalance?: number;
+  equippedSkinId?: SkinId | null;
   error?: string | null;
 };
 
@@ -97,4 +105,38 @@ export type WeeklyLeaderboardResponse = {
   updatedAt: string;
   entries: WeeklyLeaderboardEntry[];
   selfEntry?: WeeklyLeaderboardEntry | null;
+};
+
+export type SkinCatalogItem = {
+  id: PurchasableSkinId;
+  name: string;
+  description: string;
+  priceCoins: number;
+};
+
+export type ShopSkin = SkinCatalogItem & {
+  owned: boolean;
+  equipped: boolean;
+};
+
+export type ShopCatalogResponse = {
+  coins: number;
+  equippedSkinId: SkinId | null;
+  skins: ShopSkin[];
+};
+
+export type WalletTransactionReason = "daily_rank_reward" | "skin_purchase";
+
+export type WalletTransaction = {
+  id: number;
+  amount: number;
+  reason: WalletTransactionReason;
+  createdAt: string;
+  metadata?: unknown | null;
+};
+
+export type WalletResponse = {
+  coins: number;
+  equippedSkinId: SkinId | null;
+  transactions: WalletTransaction[];
 };

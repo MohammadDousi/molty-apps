@@ -8,6 +8,9 @@ import type {
   DailyStat,
   LeaderboardResponse,
   DailyHistoryResponse,
+  ShopCatalogResponse,
+  SkinId,
+  WalletResponse,
   WeeklyStat,
   WeeklyLeaderboardResponse,
 } from "@molty/shared";
@@ -228,6 +231,8 @@ export const createServer = ({
           honorTitle: null,
           totalSeconds: 0,
           status: "private",
+          coinBalance: user.coinBalance ?? 0,
+          equippedSkinId: user.equippedSkinId ?? null,
           error: null,
         };
       }
@@ -237,6 +242,8 @@ export const createServer = ({
           honorTitle,
           totalSeconds: 0,
           status: "error",
+          coinBalance: user.coinBalance ?? 0,
+          equippedSkinId: user.equippedSkinId ?? null,
           error: "No stats synced yet",
         };
       }
@@ -246,6 +253,8 @@ export const createServer = ({
         honorTitle,
         totalSeconds: stat.totalSeconds,
         status: stat.status,
+        coinBalance: user.coinBalance ?? 0,
+        equippedSkinId: user.equippedSkinId ?? null,
         error: stat.error ?? null,
       };
     };
@@ -350,6 +359,51 @@ export const createServer = ({
 
     const groupPeerIds = new Set(await store.getGroupPeerIds(viewer.id));
     return groupPeerIds.has(target.id);
+  };
+
+  const buildShopCatalog = async (
+    userId: number
+  ): Promise<ShopCatalogResponse | null> => {
+    const user = await store.getUserById(userId);
+    if (!user) {
+      return null;
+    }
+
+    const skinCatalog = await store.listSkinCatalog();
+    const ownedSkinIds = new Set(await store.listOwnedSkinIds(userId));
+    return {
+      coins: user.coinBalance,
+      equippedSkinId: user.equippedSkinId ?? null,
+      skins: skinCatalog.map((skin) => ({
+        ...skin,
+        owned: ownedSkinIds.has(skin.id),
+        equipped: user.equippedSkinId === skin.id,
+      })),
+    };
+  };
+
+  const buildWallet = async (
+    userId: number
+  ): Promise<WalletResponse | null> => {
+    const wallet = await store.getWallet({
+      userId,
+      limit: 20,
+    });
+    if (!wallet) {
+      return null;
+    }
+
+    return {
+      coins: wallet.coinBalance,
+      equippedSkinId: wallet.equippedSkinId,
+      transactions: wallet.transactions.map((entry) => ({
+        id: entry.id,
+        amount: entry.amount,
+        reason: entry.reason,
+        metadata: entry.metadata,
+        createdAt: entry.createdAt.toISOString(),
+      })),
+    };
   };
 
   const app = new Elysia({ adapter: node() })
@@ -713,6 +767,134 @@ export const createServer = ({
             }),
           }
         )
+        .get("/wallet", async ({ headers, set }) => {
+          const authCheck = await requireSession(headers, set);
+          if (!authCheck.ok) {
+            return { error: "Unauthorized" };
+          }
+
+          const wallet = await buildWallet(authCheck.user.id);
+          if (!wallet) {
+            set.status = 401;
+            return { error: "Unauthorized" };
+          }
+
+          return wallet;
+        })
+        .get("/shop/skins", async ({ headers, set }) => {
+          const authCheck = await requireSession(headers, set);
+          if (!authCheck.ok) {
+            return { error: "Unauthorized" };
+          }
+
+          const catalog = await buildShopCatalog(authCheck.user.id);
+          if (!catalog) {
+            set.status = 401;
+            return { error: "Unauthorized" };
+          }
+
+          return catalog;
+        })
+        .post(
+          "/shop/skins/:skinId/purchase",
+          async ({ params, headers, set }) => {
+            const authCheck = await requireSession(headers, set);
+            if (!authCheck.ok) {
+              return { error: "Unauthorized" };
+            }
+
+            const skinId = params.skinId.trim().toLowerCase();
+            if (!skinId || skinId === "classic") {
+              set.status = 404;
+              return { error: "Skin not found" };
+            }
+
+            const selectedSkin = await store.getSkinCatalogItemById(skinId);
+            if (!selectedSkin) {
+              set.status = 404;
+              return { error: "Skin not found" };
+            }
+
+            const result = await store.purchaseSkin({
+              userId: authCheck.user.id,
+              skinId: selectedSkin.id,
+              purchasedAt: new Date(),
+            });
+
+            if (result === "insufficient_funds") {
+              set.status = 409;
+              return { error: "Not enough coins" };
+            }
+            if (result === "skin_not_found") {
+              set.status = 404;
+              return { error: "Skin not found" };
+            }
+            if (result === "user_not_found") {
+              set.status = 401;
+              return { error: "Unauthorized" };
+            }
+
+            const catalog = await buildShopCatalog(authCheck.user.id);
+            if (!catalog) {
+              set.status = 401;
+              return { error: "Unauthorized" };
+            }
+
+            return catalog;
+          },
+          {
+            params: t.Object({
+              skinId: t.String(),
+            }),
+          }
+        )
+        .post(
+          "/shop/skins/:skinId/equip",
+          async ({ params, headers, set }) => {
+            const authCheck = await requireSession(headers, set);
+            if (!authCheck.ok) {
+              return { error: "Unauthorized" };
+            }
+
+            const requestedSkin = params.skinId.trim().toLowerCase();
+            const isClassic = requestedSkin === "classic";
+            if (!isClassic && !requestedSkin) {
+              set.status = 404;
+              return { error: "Skin not found" };
+            }
+
+            const nextSkinId: SkinId | null = isClassic ? null : requestedSkin;
+            if (nextSkinId) {
+              const selectedSkin = await store.getSkinCatalogItemById(nextSkinId);
+              if (!selectedSkin) {
+                set.status = 404;
+                return { error: "Skin not found" };
+              }
+            }
+
+            if (nextSkinId) {
+              const owned = new Set(await store.listOwnedSkinIds(authCheck.user.id));
+              if (!owned.has(nextSkinId)) {
+                set.status = 403;
+                return { error: "Skin not owned" };
+              }
+            }
+
+            await store.setEquippedSkin(authCheck.user.id, nextSkinId);
+            const catalog = await buildShopCatalog(authCheck.user.id);
+            if (!catalog) {
+              set.status = 401;
+              return { error: "Unauthorized" };
+            }
+
+            return catalog;
+          },
+          {
+            params: t.Object({
+              skinId: t.String(),
+            }),
+          }
+        )
         .post(
           "/friends",
           async ({ body, set, headers }) => {
@@ -1071,6 +1253,8 @@ export const createServer = ({
                 totalSeconds: 0,
                 dailyAverageSeconds: 0,
                 status: "private",
+                coinBalance: user.coinBalance ?? 0,
+                equippedSkinId: user.equippedSkinId ?? null,
                 error: null,
               };
             }
@@ -1081,6 +1265,8 @@ export const createServer = ({
                 totalSeconds: 0,
                 dailyAverageSeconds: 0,
                 status: "error",
+                coinBalance: user.coinBalance ?? 0,
+                equippedSkinId: user.equippedSkinId ?? null,
                 error: "No stats synced yet",
               };
             }
@@ -1091,6 +1277,8 @@ export const createServer = ({
               totalSeconds: stat.totalSeconds,
               dailyAverageSeconds: stat.dailyAverageSeconds,
               status: stat.status,
+              coinBalance: user.coinBalance ?? 0,
+              equippedSkinId: user.equippedSkinId ?? null,
               error: stat.error ?? null,
             };
           };
